@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>プロフィール</title>
+  <style>
+    :root{
+      --bg:#0f172a; --card:#111827; --text:#e5e7eb; --muted:#94a3b8; --accent:#22c55e; --line:#1f2937;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;
+      background:radial-gradient(1200px 800px at 20% -10%,#1e293b 0,#0b1220 40%,#060a13 100%), var(--bg);
+      color:var(--text); display:flex; min-height:100vh; align-items:center; justify-content:center; padding:24px;
+    }
+    .profile{
+      width:100%; max-width:860px; background:linear-gradient(180deg,rgba(255,255,255,0.04),transparent 40%), var(--card);
+      border:1px solid var(--line); border-radius:16px; overflow:hidden; box-shadow:0 30px 80px rgba(0,0,0,.4);
+      display:grid; grid-template-columns:280px 1fr; gap:0;
+    } 
+    @media (max-width:720px){ .profile{ grid-template-columns:1fr } }
+    .side{
+      background:
+        radial-gradient(600px 200px at 50% -20%,rgba(34,197,94,.25),transparent 60%),
+        linear-gradient(180deg,rgba(255,255,255,.04),transparent 60%);
+      padding:28px; display:flex; flex-direction:column; align-items:center; border-right:1px solid var(--line);
+    }
+    @media (max-width:720px){ .side{ border-right:none; border-bottom:1px solid var(--line) } }
+    .avatar{
+      width:140px; height:140px; border-radius:50%; object-fit:cover; border:3px solid rgba(255,255,255,.08);
+      box-shadow:0 10px 40px rgba(34,197,94,.25);
+    }
+    .name{ margin:16px 0 4px; font-size:22px; font-weight:700; letter-spacing:.2px }
+    .title{ margin:0; color:var(--muted); font-size:14px }
+    .actions{ display:flex; gap:10px; margin-top:18px }
+    .btn{
+      padding:10px 14px; border-radius:10px; border:1px solid var(--line); color:var(--text);
+      background:#0b1220; cursor:pointer; transition:.2s; font-weight:600; font-size:14px;
+    }
+    .btn:hover{ transform:translateY(-1px); border-color:#2a3344 }
+    .btn.primary{ background:linear-gradient(180deg,#22c55e,#16a34a); border:1px solid #16a34a; color:#06100a }
+    .stats{
+      display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-top:18px; width:100%;
+    }
+    .stat{ background:#0b1220; border:1px solid var(--line); border-radius:12px; padding:12px; text-align:center }
+    .stat .num{ font-size:18px; font-weight:800 }
+    .stat .label{ font-size:12px; color:var(--muted) }
+
+    .main{ padding:28px }
+    .section{ margin-bottom:24px }
+    .section h3{ margin:0 0 10px; font-size:14px; letter-spacing:.08em; color:#a3b3c5; text-transform:uppercase }
+    .bio{
+      background:#0b1220; border:1px solid var(--line); border-radius:12px; padding:14px; line-height:1.7; color:#cbd5e1
+    }
+    .chips{ display:flex; flex-wrap:wrap; gap:8px }
+    .chip{
+      font-size:12px; padding:8px 10px; border-radius:999px; background:#0b1220; border:1px solid var(--line); color:#cbd5e1
+    }
+    .list{ display:grid; gap:10px }
+    .item{
+      display:flex; align-items:center; justify-content:space-between; background:#0b1220; border:1px solid var(--line);
+      border-radius:12px; padding:12px;
+    }
+    .left{ display:flex; gap:12px; align-items:center }
+    .dot{ width:10px; height:10px; border-radius:50%; background:var(--accent); box-shadow:0 0 10px rgba(34,197,94,.6) }
+    a{ color:#7dd3fc; text-decoration:none }
+    a:hover{ text-decoration:underline }
+  </style>
+</head>
+<body>
+  <article class="profile">
+    <aside class="side">
+      <img class="avatar" src="file:///Users/izumimasaki/Desktop/ZIy9GCFbQ-eFmLGg5AgiTQ.jpg" alt="avatar" />
+      <h1 class="name">Masaki Izumi</h1>
+      <p class="title">Frontend Engineer @ Example Inc.</p>
+      <div class="actions">
+        <button class="btn primary">フォロー</button>
+        <button class="btn">メッセージ</button>
+      </div>
+      <div class="stats">
+        <div class="stat"><div class="num">128</div><div class="label">投稿</div></div>
+        <div class="stat"><div class="num">2.4k</div><div class="label">フォロワー</div></div>
+        <div class="stat"><div class="num">312</div><div class="label">フォロー中</div></div>
+      </div>
+    </aside>
+
+    <section class="main">
+      <div class="section">
+        <h3>自己紹介</h3>
+        <p class="bio">
+          現在、プログラミング学習中。<br>
+          習得したい言語は、HTML、CSS、JavaScript、TypeScript。<br>
+          休日はアニメやYoutubeを見ています。<br>
+          犬も猫も好きです。
+        </p>
+      </div>
+
+      <div class="section">
+        <h3>スキル</h3>
+        <div class="chips">
+          <span class="chip">Excel</span>
+          <span class="chip">BAT Script</span>
+          <span class="chip">VBScript</span>
+          <span class="chip">Python</span>
+        </div>
+      </div>
+
+      <div class="section">
+        <h3>資格</h3>
+        <div class="list">
+          <div class="item">
+            <div class="left">
+              <span class="dot"></span>
+              <div>
+                <div>ITパスポート</div>
+                <small class="muted">2024-01-09</a></small>
+              </div>
+            </div>
+            <a href="#"></a>
+          </div>
+          <div class="item">
+            <div class="left">
+              <span class="dot"></span>
+              <div>
+                <div>ITILファンデーション</div>
+                <small class="muted">2024-10-04</a></small>
+              </div>
+            </div>
+            <a href="https://candidate.peoplecert.org/ReportsLink.aspx?argType=1&id=A6FBB9B23BEA93BCF93E7A8638F3771026E6D726EB4CE63D6C33A78EEFD522E0259D5F2834214B41815622B1F44F9B74">証明書 →</a>
+          </div>
+          <div class="item">
+            <div class="left">
+              <span class="dot"></span>
+              <div>
+                <div>PL-900: Microsoft Power Platform Fundamentals</div>
+                <small class="muted">2025-09-28</a></small>
+              </div>
+            </div>
+            <a href="file:///Users/izumimasaki/Desktop/Power Platform Fundamentals.pdf">証明書 →</a>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <h3>リンク</h3>
+        <div class="chips">
+          <a class="chip" href="#">GitHub</a>
+          <a class="chip" href="#">X</a>
+          <a class="chip" href="#">Portfolio</a>
+          <a class="chip" href="mailto:you@example.com">Email</a>
+        </div>
+      </div>
+    </section>
+  </article>
+</body>
+</html>

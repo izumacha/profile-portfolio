@@ -1,438 +1,497 @@
 <!DOCTYPE html>
 <html lang="ja">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>履歴書 - 泉将貴</title>
-  <style>
-    :root {
-      --primary: #2563eb;
-      --secondary: #64748b;
-      --text: #1e293b;
-      --text-light: #64748b;
-      --border: #e2e8f0;
-      --bg: #ffffff;
-      --accent: #f8fafc;
-    }
-    
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
-    
-    body {
-      font-family: 'Hiragino Sans', 'Yu Gothic UI', 'Meiryo UI', sans-serif;
-      line-height: 1.6;
-      color: var(--text);
-      background: var(--bg);
-    }
-    
-    .container {
-      max-width: 800px;
-      margin: 0 auto;
-      padding: 40px 20px;
-    }
-    
-    .header {
-      text-align: center;
-      margin-bottom: 40px;
-      padding-bottom: 30px;
-      border-bottom: 2px solid var(--border);
-    }
-    
-    .avatar {
-      width: 120px;
-      height: 120px;
-      border-radius: 50%;
-      object-fit: cover;
-      margin-bottom: 20px;
-      border: 3px solid var(--border);
-    }
-    
-    .name {
-      font-size: 2.5rem;
-      font-weight: 700;
-      color: var(--text);
-      margin-bottom: 8px;
-    }
-    
-    .title {
-      font-size: 1.2rem;
-      color: var(--text-light);
-      margin-bottom: 20px;
-    }
-    
-    .contact-info {
-      display: flex;
-      justify-content: center;
-      gap: 30px;
-      flex-wrap: wrap;
-    }
-    
-    .contact-item {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 0.95rem;
-    }
-    
-    .section {
-      margin-bottom: 40px;
-    }
-    
-    .section-title {
-      font-size: 1.4rem;
-      font-weight: 700;
-      color: var(--primary);
-      margin-bottom: 20px;
-      padding-bottom: 8px;
-      border-bottom: 2px solid var(--primary);
-    }
-    
-    .timeline {
-      position: relative;
-      padding-left: 30px;
-    }
-    
-    .timeline::before {
-      content: '';
-      position: absolute;
-      left: 15px;
-      top: 0;
-      bottom: 0;
-      width: 2px;
-      background: var(--border);
-    }
-    
-    .timeline-item {
-      position: relative;
-      margin-bottom: 30px;
-      background: var(--accent);
-      padding: 20px;
-      border-radius: 8px;
-      border-left: 4px solid var(--primary);
-    }
-    
-    .timeline-item::before {
-      content: '';
-      position: absolute;
-      left: -37px;
-      top: 25px;
-      width: 12px;
-      height: 12px;
-      border-radius: 50%;
-      background: var(--primary);
-      border: 3px solid var(--bg);
-    }
-    
-    .timeline-date {
-      font-size: 0.9rem;
-      color: var(--text-light);
-      font-weight: 600;
-      margin-bottom: 5px;
-    }
-    
-    .timeline-title {
-      font-size: 1.1rem;
-      font-weight: 700;
-      color: var(--text);
-      margin-bottom: 8px;
-    }
-    
-    .timeline-org {
-      font-size: 1rem;
-      color: var(--primary);
-      font-weight: 600;
-      margin-bottom: 8px;
-    }
-    
-    .timeline-desc {
-      color: var(--text-light);
-      line-height: 1.5;
-    }
-    
-    .skills-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-      gap: 20px;
-    }
-    
-    .skill-category {
-      background: var(--accent);
-      padding: 20px;
-      border-radius: 8px;
-      border-left: 4px solid var(--primary);
-    }
-    
-    .skill-category h4 {
-      font-size: 1.1rem;
-      font-weight: 700;
-      color: var(--text);
-      margin-bottom: 12px;
-    }
-    
-    .skill-list {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-    }
-    
-    .skill-tag {
-      background: var(--primary);
-      color: white;
-      padding: 4px 12px;
-      border-radius: 20px;
-      font-size: 0.85rem;
-      font-weight: 500;
-    }
-    
-    .cert-grid {
-      display: grid;
-      gap: 15px;
-    }
-    
-    .cert-item {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      background: var(--accent);
-      padding: 15px 20px;
-      border-radius: 8px;
-      border-left: 4px solid var(--primary);
-    }
-    
-    .cert-info h4 {
-      font-size: 1rem;
-      font-weight: 700;
-      color: var(--text);
-      margin-bottom: 4px;
-    }
-    
-    .cert-date {
-      font-size: 0.9rem;
-      color: var(--text-light);
-    }
-    
-    .cert-link {
-      color: var(--primary);
-      text-decoration: none;
-      font-weight: 600;
-      padding: 8px 16px;
-      border: 2px solid var(--primary);
-      border-radius: 6px;
-      transition: all 0.2s;
-    }
-    
-    .cert-link:hover {
-      background: var(--primary);
-      color: white;
-    }
-    
-    .links-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-      gap: 15px;
-    }
-    
-    .link-item {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: var(--primary);
-      color: white;
-      text-decoration: none;
-      padding: 15px 20px;
-      border-radius: 8px;
-      font-weight: 600;
-      transition: all 0.2s;
-    }
-    
-    .link-item:hover {
-      background: #1d4ed8;
-      transform: translateY(-2px);
-    }
-    
-    .about {
-      background: var(--accent);
-      padding: 25px;
-      border-radius: 8px;
-      border-left: 4px solid var(--primary);
-      line-height: 1.7;
-    }
-    
-    @media (max-width: 768px) {
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>履歴書 - 泉将貴</title>
+    <style>
+      :root {
+        --primary: #2563eb;
+        --secondary: #64748b;
+        --text: #1e293b;
+        --text-light: #64748b;
+        --border: #e2e8f0;
+        --bg: #ffffff;
+        --accent: #f8fafc;
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        font-family: "Hiragino Sans", "Yu Gothic UI", "Meiryo UI", sans-serif;
+        line-height: 1.6;
+        color: var(--text);
+        background: var(--bg);
+      }
+
       .container {
-        padding: 20px 15px;
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 40px 20px;
       }
-      
+
+      .header {
+        text-align: center;
+        margin-bottom: 40px;
+        padding-bottom: 30px;
+        border-bottom: 2px solid var(--border);
+      }
+
+      .avatar {
+        width: 120px;
+        height: 120px;
+        border-radius: 50%;
+        object-fit: cover;
+        margin-bottom: 20px;
+        border: 3px solid var(--border);
+      }
+
       .name {
-        font-size: 2rem;
+        font-size: 2.5rem;
+        font-weight: 700;
+        color: var(--text);
+        margin-bottom: 8px;
       }
-      
+
+      .title {
+        font-size: 1.2rem;
+        color: var(--text-light);
+        margin-bottom: 20px;
+      }
+
       .contact-info {
+        display: flex;
+        justify-content: center;
+        gap: 30px;
+        flex-wrap: wrap;
+      }
+
+      .contact-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 0.95rem;
+      }
+
+      .section {
+        margin-bottom: 40px;
+      }
+
+      .section-title {
+        font-size: 1.4rem;
+        font-weight: 700;
+        color: var(--primary);
+        margin-bottom: 20px;
+        padding-bottom: 8px;
+        border-bottom: 2px solid var(--primary);
+      }
+
+      .timeline {
+        position: relative;
+        padding-left: 30px;
+      }
+
+      .timeline::before {
+        content: "";
+        position: absolute;
+        left: 15px;
+        top: 0;
+        bottom: 0;
+        width: 2px;
+        background: var(--border);
+      }
+
+      .timeline-item {
+        position: relative;
+        margin-bottom: 30px;
+        background: var(--accent);
+        padding: 20px;
+        border-radius: 8px;
+        border-left: 4px solid var(--primary);
+      }
+
+      .timeline-item::before {
+        content: "";
+        position: absolute;
+        left: -37px;
+        top: 25px;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: var(--primary);
+        border: 3px solid var(--bg);
+      }
+
+      .timeline-date {
+        font-size: 0.9rem;
+        color: var(--text-light);
+        font-weight: 600;
+        margin-bottom: 5px;
+      }
+
+      .timeline-title {
+        font-size: 1.1rem;
+        font-weight: 700;
+        color: var(--text);
+        margin-bottom: 8px;
+      }
+
+      .timeline-org {
+        font-size: 1rem;
+        color: var(--primary);
+        font-weight: 600;
+        margin-bottom: 8px;
+      }
+
+      .timeline-desc {
+        color: var(--text-light);
+        line-height: 1.5;
+      }
+
+      .skills-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 20px;
+      }
+
+      .skill-category {
+        background: var(--accent);
+        padding: 20px;
+        border-radius: 8px;
+        border-left: 4px solid var(--primary);
+      }
+
+      .skill-category h4 {
+        font-size: 1.1rem;
+        font-weight: 700;
+        color: var(--text);
+        margin-bottom: 12px;
+      }
+
+      .skill-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .skill-tag {
+        background: var(--primary);
+        color: white;
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 0.85rem;
+        font-weight: 500;
+      }
+
+      .cert-grid {
+        display: grid;
         gap: 15px;
       }
-      
-      .timeline {
-        padding-left: 20px;
+
+      .cert-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background: var(--accent);
+        padding: 15px 20px;
+        border-radius: 8px;
+        border-left: 4px solid var(--primary);
       }
-      
-      .timeline-item::before {
-        left: -27px;
+
+      .cert-info h4 {
+        font-size: 1rem;
+        font-weight: 700;
+        color: var(--text);
+        margin-bottom: 4px;
       }
-      
-      .skills-grid {
-        grid-template-columns: 1fr;
+
+      .cert-date {
+        font-size: 0.9rem;
+        color: var(--text-light);
       }
-    }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <!-- ヘッダー -->
-    <header class="header">
-      <img class="avatar" src="avatar.jpg" alt="泉将貴" />
-      <h1 class="name">泉将貴</h1>
-      <p class="title">フルスタックエンジニア志望</p>
-      <div class="contact-info">
-        <div class="contact-item">
-          <span>📧</span>
-          <a href="mailto:izumacha.1010@gmail.com">izumacha.1010@gmail.com</a>
-        </div>
-        <div class="contact-item">
-          <span>🐙</span>
-          <a href="https://github.com/izumacha" target="_blank" rel="noopener noreferrer">GitHub</a>
-        </div>
-        <div class="contact-item">
-          <span>💼</span>
-          <a href="https://github.com/izumacha/profile-portfolio" target="_blank" rel="noopener noreferrer">Portfolio</a>
-        </div>
-      </div>
-    </header>
 
-    <!-- 自己紹介 -->
-    <section class="section">
-      <h2 class="section-title">自己紹介</h2>
-      <div class="about">
-        現在、プログラミング学習中です。<br>
-        習得したい言語は、HTML、CSS、JavaScript、TypeScript、Pythonです。<br>
-        休日はアニメやYoutubeを見ています。<br>
-        技術的な課題解決や新しい技術の習得に積極的に取り組み、<br>
-        チームワークを大切にしています。<br>
-      </div>
-    </section>
+      .cert-link {
+        color: var(--primary);
+        text-decoration: none;
+        font-weight: 600;
+        padding: 8px 16px;
+        border: 2px solid var(--primary);
+        border-radius: 6px;
+        transition: all 0.2s;
+      }
 
-    <!-- スキル -->
-    <section class="section">
-      <h2 class="section-title">スキル</h2>
-      <div class="skills-grid">
-        <div class="skill-category">
-          <h4>プログラミング言語(学習中)</h4>
-          <div class="skill-list">
-            <span class="skill-tag">HTML</span>
-            <span class="skill-tag">CSS</span>
-            <span class="skill-tag">JavaScript</span>
-            <span class="skill-tag">TypeScript</span>
-            <span class="skill-tag">Python</span>
-          </div>
-        </div>
-        <div class="skill-category">
-          <h4>ツール・その他</h4>
-          <div class="skill-list">
-            <span class="skill-tag">Excel</span>
-            <span class="skill-tag">BAT Script</span>
-            <span class="skill-tag">VBScript</span>
-            <span class="skill-tag">Git</span>
-            <span class="skill-tag">GitHub</span>
-          </div>
-        </div>
-      </div>
-    </section>
+      .cert-link:hover {
+        background: var(--primary);
+        color: white;
+      }
 
-    <!-- 資格 -->
-    <section class="section">
-      <h2 class="section-title">資格・認定</h2>
-      <div class="cert-grid">
-        <div class="cert-item">
-          <div class="cert-info">
-            <h4>PL-900: Microsoft Power Platform Fundamentals</h4>
-            <div class="cert-date">2025年9月28日取得</div>
-          </div>
-          <a href="PL-900-certificate.pdf" class="cert-link" target="_blank" rel="noopener noreferrer">証明書</a>
-        </div>
-        <div class="cert-item">
-          <div class="cert-info">
-            <h4>ITILファンデーション</h4>
-            <div class="cert-date">2024年10月4日取得</div>
-          </div>
-          <a href="https://candidate.peoplecert.org/ReportsLink.aspx?argType=1&id=A6FBB9B23BEA93BCF93E7A8638F3771026E6D726EB4CE63D6C33A78EEFD522E0259D5F2834214B41815622B1F44F9B74" class="cert-link" target="_blank" rel="noopener noreferrer">証明書</a>
-        </div>
-        <div class="cert-item">
-          <div class="cert-info">
-            <h4>ITパスポート</h4>
-            <div class="cert-date">2024年1月9日取得</div>
-          </div>
-          <a href="#" class="cert-link">証明書</a>
-        </div>
-      </div>
-    </section>
+      .links-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 15px;
+      }
 
-    <!-- 学習履歴 -->
-    <section class="section">
-      <h2 class="section-title">学習履歴</h2>
-      <div class="timeline">
-        <div class="timeline-item">
-          <div class="timeline-date">2025年10月 - 現在</div>
-          <div class="timeline-title">プログラミング学習</div>
-          <div class="timeline-org">独学</div>
-          <div class="timeline-desc">
-            HTML、CSS、JavaScript、TypeScript、Pythonの基礎を学習中。<br>
-            実際のプロジェクトを通じて実践的なスキルを身につけています。
-          </div>
-        </div>
-        <div class="timeline-item">
-          <div class="timeline-date">2025年9月</div>
-          <div class="timeline-title">PL-900: Microsoft Power Platform Fundamentals取得</div>
-          <div class="timeline-org">Microsoft</div>
-          <div class="timeline-desc">
-            Microsoft Power Platformの基礎知識を習得し、認定資格を取得しました。
-          </div>
-        </div>
-        <div class="timeline-item">
-          <div class="timeline-date">2024年10月</div>
-          <div class="timeline-title">ITILファンデーション取得</div>
-          <div class="timeline-org">PeopleCert</div>
-          <div class="timeline-desc">
-            ITサービスマネジメントのベストプラクティスを学習し、認定資格を取得しました。
-          </div>
-        </div>
-        <div class="timeline-item">
-          <div class="timeline-date">2024年1月</div>
-          <div class="timeline-title">ITパスポート取得</div>
-          <div class="timeline-org">IPA</div>
-          <div class="timeline-desc">
-            情報技術に関する基礎知識を習得し、認定資格を取得しました。
-          </div>
-        </div>
-      </div>
-    </section>
+      .link-item {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: var(--primary);
+        color: white;
+        text-decoration: none;
+        padding: 15px 20px;
+        border-radius: 8px;
+        font-weight: 600;
+        transition: all 0.2s;
+      }
 
-    <!-- リンク -->
-    <section class="section">
-      <h2 class="section-title">リンク</h2>
-      <div class="links-grid">
-        <a href="https://github.com/izumacha" class="link-item" target="_blank" rel="noopener noreferrer">
-          🐙 GitHub
-        </a>
-        <a href="https://github.com/izumacha/profile-portfolio" class="link-item" target="_blank" rel="noopener noreferrer">
-          💼 Portfolio
-        </a>
-        <a href="mailto:izumacha.1010@gmail.com" class="link-item">
-          📧 Email
-        </a>
-      </div>
-    </section>
-  </div>
-</body>
+      .link-item:hover {
+        background: #1d4ed8;
+        transform: translateY(-2px);
+      }
+
+      .about {
+        background: var(--accent);
+        padding: 25px;
+        border-radius: 8px;
+        border-left: 4px solid var(--primary);
+        line-height: 1.7;
+      }
+
+      @media (max-width: 768px) {
+        .container {
+          padding: 20px 15px;
+        }
+
+        .name {
+          font-size: 2rem;
+        }
+
+        .contact-info {
+          gap: 15px;
+        }
+
+        .timeline {
+          padding-left: 20px;
+        }
+
+        .timeline-item::before {
+          left: -27px;
+        }
+
+        .skills-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <!-- ヘッダー -->
+      <header class="header">
+        <img class="avatar" src="avatar.jpg" alt="泉将貴" />
+        <h1 class="name">泉将貴</h1>
+        <p class="title">フルスタックエンジニア志望</p>
+        <div class="contact-info">
+          <div class="contact-item">
+            <span>📧</span>
+            <a href="mailto:izumacha.1010@gmail.com">izumacha.1010@gmail.com</a>
+          </div>
+          <div class="contact-item">
+            <span>🐙</span>
+            <a
+              href="https://github.com/izumacha"
+              target="_blank"
+              rel="noopener noreferrer"
+              >GitHub</a
+            >
+          </div>
+          <div class="contact-item">
+            <span>💼</span>
+            <a
+              href="https://github.com/izumacha/profile-portfolio"
+              target="_blank"
+              rel="noopener noreferrer"
+              >Portfolio</a
+            >
+          </div>
+        </div>
+      </header>
+
+      <!-- 自己紹介 -->
+      <section class="section">
+        <h2 class="section-title">自己紹介</h2>
+        <div class="about">
+          現在、プログラミング学習中です。<br />
+          習得したい言語は、HTML、CSS、JavaScript、TypeScript、Pythonです。<br />
+          休日はアニメやYoutubeを見ています。<br />
+          技術的な課題解決や新しい技術の習得に積極的に取り組み、<br />
+          チームワークを大切にしています。<br />
+        </div>
+      </section>
+
+      <!-- スキル -->
+      <section class="section">
+        <h2 class="section-title">スキル</h2>
+        <div class="skills-grid">
+          <div class="skill-category">
+            <h4>プログラミング言語(学習中)</h4>
+            <div class="skill-list">
+              <span class="skill-tag">HTML</span>
+              <span class="skill-tag">CSS</span>
+              <span class="skill-tag">JavaScript</span>
+              <span class="skill-tag">TypeScript</span>
+              <span class="skill-tag">Python</span>
+            </div>
+          </div>
+          <div class="skill-category">
+            <h4>ツール・その他</h4>
+            <div class="skill-list">
+              <span class="skill-tag">Excel</span>
+              <span class="skill-tag">BAT Script</span>
+              <span class="skill-tag">VBScript</span>
+              <span class="skill-tag">Git</span>
+              <span class="skill-tag">GitHub</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 資格 -->
+      <section class="section">
+        <h2 class="section-title">資格・認定</h2>
+        <div class="cert-grid">
+          <div class="cert-item">
+            <div class="cert-info">
+              <h4>PL-500: Microsoft Power Automate RPA Developer Associate</h4>
+              <div class="cert-date">2025年12月23日取得</div>
+            </div>
+            <a
+              href="Power%20Automate%20RPA%20Developer%20Associate.pdf"
+              class="cert-link"
+              target="_blank"
+              rel="noopener noreferrer"
+              >証明書</a
+            >
+          </div>
+          <div class="cert-item">
+            <div class="cert-info">
+              <h4>PL-900: Microsoft Power Platform Fundamentals</h4>
+              <div class="cert-date">2025年9月28日取得</div>
+            </div>
+            <a
+              href="PL-900-certificate.pdf"
+              class="cert-link"
+              target="_blank"
+              rel="noopener noreferrer"
+              >証明書</a
+            >
+          </div>
+          <div class="cert-item">
+            <div class="cert-info">
+              <h4>ITILファンデーション</h4>
+              <div class="cert-date">2024年10月4日取得</div>
+            </div>
+            <a
+              href="https://candidate.peoplecert.org/ReportsLink.aspx?argType=1&id=A6FBB9B23BEA93BCF93E7A8638F3771026E6D726EB4CE63D6C33A78EEFD522E0259D5F2834214B41815622B1F44F9B74"
+              class="cert-link"
+              target="_blank"
+              rel="noopener noreferrer"
+              >証明書</a
+            >
+          </div>
+          <div class="cert-item">
+            <div class="cert-info">
+              <h4>ITパスポート</h4>
+              <div class="cert-date">2024年1月9日取得</div>
+            </div>
+            <a href="#" class="cert-link">証明書</a>
+          </div>
+        </div>
+      </section>
+
+      <!-- 学習履歴 -->
+      <section class="section">
+        <h2 class="section-title">学習履歴</h2>
+        <div class="timeline">
+          <div class="timeline-item">
+            <div class="timeline-date">2025年10月 - 現在</div>
+            <div class="timeline-title">プログラミング学習</div>
+            <div class="timeline-org">独学</div>
+            <div class="timeline-desc">
+              HTML、CSS、JavaScript、TypeScript、Pythonの基礎を学習中。<br />
+              実際のプロジェクトを通じて実践的なスキルを身につけています。
+            </div>
+          </div>
+          <div class="timeline-item">
+            <div class="timeline-date">2025年12月</div>
+            <div class="timeline-title">
+              PL-500: Microsoft Power Automate RPA Developer Associate
+            </div>
+            <div class="timeline-org">Microsoft</div>
+            <div class="timeline-desc">
+              Microsoft Power
+              Automateを使用したRPAソリューションの設計、開発、実装に関する専門知識を習得し、認定資格を取得しました。デスクトップフローとクラウドフローを組み合わせた自動化ソリューションの構築スキルを証明します。
+            </div>
+          </div>
+          <div class="timeline-item">
+            <div class="timeline-date">2025年9月</div>
+            <div class="timeline-title">
+              PL-900: Microsoft Power Platform Fundamentals取得
+            </div>
+            <div class="timeline-org">Microsoft</div>
+            <div class="timeline-desc">
+              Microsoft Power
+              Platformの基礎知識を習得し、認定資格を取得しました。
+            </div>
+          </div>
+          <div class="timeline-item">
+            <div class="timeline-date">2024年10月</div>
+            <div class="timeline-title">ITILファンデーション取得</div>
+            <div class="timeline-org">PeopleCert</div>
+            <div class="timeline-desc">
+              ITサービスマネジメントのベストプラクティスを学習し、認定資格を取得しました。
+            </div>
+          </div>
+          <div class="timeline-item">
+            <div class="timeline-date">2024年1月</div>
+            <div class="timeline-title">ITパスポート取得</div>
+            <div class="timeline-org">IPA</div>
+            <div class="timeline-desc">
+              情報技術に関する基礎知識を習得し、認定資格を取得しました。
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- リンク -->
+      <section class="section">
+        <h2 class="section-title">リンク</h2>
+        <div class="links-grid">
+          <a
+            href="https://github.com/izumacha"
+            class="link-item"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            🐙 GitHub
+          </a>
+          <a
+            href="https://github.com/izumacha/profile-portfolio"
+            class="link-item"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            💼 Portfolio
+          </a>
+          <a href="mailto:izumacha.1010@gmail.com" class="link-item">
+            📧 Email
+          </a>
+        </div>
+      </section>
+    </div>
+  </body>
 </html>

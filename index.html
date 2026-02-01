@@ -13,17 +13,17 @@
     <style>
       :root {
         --primary: #6366f1;
-        --primary-light: #818cf8;
+        --primary-light: #a5b4fc;
         --primary-dark: #4f46e5;
         --accent: #22d3ee;
         --accent-green: #10b981;
         --bg-dark: #0f172a;
-        --bg-card: rgba(30, 41, 59, 0.8);
-        --bg-card-hover: rgba(51, 65, 85, 0.9);
-        --text-primary: #f1f5f9;
-        --text-secondary: #94a3b8;
-        --text-muted: #64748b;
-        --border: rgba(148, 163, 184, 0.1);
+        --bg-card: rgba(30, 41, 59, 0.9);
+        --bg-card-hover: rgba(51, 65, 85, 0.95);
+        --text-primary: #ffffff;
+        --text-secondary: #e2e8f0;
+        --text-muted: #cbd5e1;
+        --border: rgba(148, 163, 184, 0.2);
         --gradient-1: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #d946ef 100%);
         --gradient-2: linear-gradient(135deg, #06b6d4 0%, #22d3ee 100%);
         --gradient-3: linear-gradient(135deg, #10b981 0%, #34d399 100%);
@@ -42,10 +42,13 @@
 
       body {
         font-family: "Inter", "Noto Sans JP", sans-serif;
-        line-height: 1.7;
+        font-size: 16px;
+        line-height: 1.8;
         color: var(--text-primary);
         background: var(--bg-dark);
         overflow-x: hidden;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
       }
 
       /* Animated Background */
@@ -250,11 +253,11 @@
       }
 
       .hero-description {
-        font-size: 1.1rem;
-        color: var(--text-muted);
+        font-size: 1.15rem;
+        color: var(--text-secondary);
         max-width: 600px;
         margin: 0 auto 2.5rem;
-        line-height: 1.8;
+        line-height: 1.9;
         animation: fadeInUp 0.8s ease 0.3s forwards;
         opacity: 0;
       }
@@ -379,10 +382,11 @@
       }
 
       .section-subtitle {
-        font-size: 1.1rem;
-        color: var(--text-muted);
+        font-size: 1.15rem;
+        color: var(--text-secondary);
         max-width: 600px;
         margin: 0 auto;
+        line-height: 1.8;
       }
 
       /* About Section */
@@ -403,7 +407,8 @@
       .about-content p {
         color: var(--text-secondary);
         margin-bottom: 1.5rem;
-        line-height: 1.8;
+        line-height: 1.9;
+        font-size: 1.05rem;
       }
 
       .about-stats {
@@ -458,9 +463,9 @@
 
       .code-block {
         font-family: "Fira Code", "Monaco", monospace;
-        font-size: 0.9rem;
-        line-height: 1.8;
-        color: var(--text-secondary);
+        font-size: 0.95rem;
+        line-height: 1.9;
+        color: var(--text-primary);
       }
 
       .code-block .keyword {
@@ -745,8 +750,8 @@
 
       .timeline-desc {
         color: var(--text-secondary);
-        font-size: 0.95rem;
-        line-height: 1.7;
+        font-size: 1rem;
+        line-height: 1.8;
       }
 
       /* Contact Section */

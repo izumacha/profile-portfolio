@@ -33,7 +33,6 @@ jobs:
             --verbose
             --no-progress
             --accept 200,201,202,203,204,206,301,302,303,307,308,429
-            --exclude-mail
             --timeout 20
             --max-retries 3
             .

@@ -1,0 +1,11 @@
+{
+  "name": "profile-portfolio",
+  "private": true,
+  "scripts": {
+    "test:lighthouse": "lhci autorun"
+  },
+  "devDependencies": {
+    "@lhci/cli": "^0.15.1"
+  }
+}
+

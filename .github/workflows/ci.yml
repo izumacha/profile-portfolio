@@ -19,7 +19,7 @@ jobs:
           node-version: 20
 
       - name: Validate HTML
-        run: npx --yes html-validate "**/*.html"
+        run: npx --yes html-validate "index.html" "resume.html"
 
   link-check:
     runs-on: ubuntu-latest

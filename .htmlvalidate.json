@@ -1,5 +1,9 @@
 {
   "extends": ["html-validate:recommended"],
+  "elements": ["html5"],
+  "transform": {
+    "^node_modules/": "off"
+  },
   "rules": {
     "void-style": "off",
     "no-raw-characters": "off",

@@ -2,10 +2,12 @@
   "name": "profile-portfolio",
   "private": true,
   "scripts": {
-    "test:lighthouse": "lhci autorun"
+    "test:lighthouse": "lhci autorun",
+    "test:e2e": "playwright test"
   },
   "devDependencies": {
-    "@lhci/cli": "^0.15.1"
+    "@lhci/cli": "^0.15.1",
+    "@playwright/test": "^1.55.0"
   }
 }
 

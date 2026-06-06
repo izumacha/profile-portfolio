@@ -1752,11 +1752,25 @@
           return el;
         }
 
-        // リンク付きの安全なバッジ要素（a）を作る。textContent 経由で XSS を防ぐ
+        // URL が http(s) スキームのみかを検証する（javascript:/data: 等の注入を防ぐ防御層）
+        function isSafeHttpUrl(href) {
+          if (!href) return false; // 空なら不可
+          try {
+            const u = new URL(href, location.href); // 相対も解決して URL として解釈
+            return u.protocol === "https:" || u.protocol === "http:"; // 許可スキームのみ true
+          } catch (e) {
+            return false; // パースできない値はリンクにしない
+          }
+        }
+
+        // リンク付きの安全なバッジ要素（a）を作る。textContent 経由で XSS を防ぐ。
+        // 万一 href が安全でない（http/https 以外）場合はリンクにせず span にフォールバックする。
         function makeLinkBadge(text, href, extraCls) {
+          // 安全な http(s) URL でなければリンク化せずテキストバッジにする（fail-safe）
+          if (!isSafeHttpUrl(href)) return makeSpanBadge(text, extraCls);
           const el = document.createElement("a"); // a 要素を生成
           el.className = "proof-badge" + (extraCls ? " " + extraCls : ""); // クラスを付与
-          el.href = href; // 本物の CI/コミット URL を設定
+          el.href = href; // 検証済みの本物の CI/コミット URL を設定
           el.target = "_blank"; // 別タブで開く
           el.rel = "noopener noreferrer"; // 規約どおりのセキュリティ属性
           const dot = document.createElement("span"); // 状態ドット

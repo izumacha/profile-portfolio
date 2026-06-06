@@ -1,0 +1,43 @@
+name: Update Playwright Snapshots
+
+# Regenerates the visual-regression baselines inside the CI environment and
+# commits them back to the triggering branch. Run this from the Actions tab
+# (or via the API) whenever the layout changes and the snapshots need to be
+# refreshed. Baselines are platform-specific, so they must be generated on the
+# same Linux runner the `visual-regression` job uses.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update-snapshots:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Update snapshots
+        run: npx playwright test --update-snapshots
+
+      - name: Commit updated snapshots
+        run: |
+          if [[ -n "$(git status --porcelain e2e)" ]]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add e2e
+            git commit -m "chore: update Playwright visual snapshots"
+            git push origin HEAD:${{ github.ref_name }}
+          else
+            echo "No snapshot changes to commit."
+          fi

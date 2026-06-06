@@ -263,6 +263,68 @@
       line-height: 1.7;
     }
     
+    .project-grid {
+      display: grid;
+      gap: 15px;
+    }
+
+    .project-item {
+      background: var(--accent);
+      padding: 16px 20px;
+      border-radius: 8px;
+      border-left: 4px solid var(--primary);
+    }
+
+    .project-item.sub {
+      border-left-color: var(--text-light);
+    }
+
+    .project-head {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 6px;
+    }
+
+    .project-head h4 {
+      font-size: 1.05rem;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .project-badge {
+      font-size: 0.7rem;
+      font-weight: 700;
+      padding: 2px 10px;
+      border-radius: 20px;
+      background: var(--primary);
+      color: white;
+    }
+
+    .project-badge.sub {
+      background: var(--text-light);
+    }
+
+    .project-link {
+      margin-left: auto;
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--primary);
+      text-decoration: none;
+    }
+
+    .project-link:hover {
+      text-decoration: underline;
+    }
+
+    .project-desc {
+      font-size: 0.9rem;
+      color: var(--text-light);
+      line-height: 1.6;
+      margin-bottom: 8px;
+    }
+
     @media (max-width: 768px) {
       .container {
         padding: 20px 15px;
@@ -348,6 +410,63 @@
             <span class="skill-tag">Git</span>
             <span class="skill-tag">GitHub</span>
           </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 代表プロジェクト -->
+    <section class="section">
+      <h2 class="section-title">代表プロジェクト</h2>
+      <div class="project-grid">
+        <div class="project-item">
+          <div class="project-head">
+            <span class="project-badge">主力</span>
+            <h4>helpdesk-hub</h4>
+            <a href="https://github.com/izumacha/helpdesk-hub" class="project-link" target="_blank" rel="noopener noreferrer">GitHub ↗</a>
+          </div>
+          <p class="project-desc">
+            社内ヘルプデスク向けチケット管理システム。問い合わせの起票・対応状況の追跡・担当割り当てを一元管理します。（Next.js 15 / TypeScript / Prisma）
+          </p>
+        </div>
+        <div class="project-item">
+          <div class="project-head">
+            <span class="project-badge">主力</span>
+            <h4>incident-insight</h4>
+            <a href="https://github.com/izumacha/incident-insight" class="project-link" target="_blank" rel="noopener noreferrer">GitHub ↗</a>
+          </div>
+          <p class="project-desc">
+            医療現場のインシデントを記録・分析し、患者安全の向上と再発防止につなげるトラッキングシステム。（C# / ASP.NET Core / Docker）
+          </p>
+        </div>
+        <div class="project-item">
+          <div class="project-head">
+            <span class="project-badge">主力</span>
+            <h4>AI-Docker-Environment</h4>
+            <a href="https://github.com/izumacha/AI-Docker-Environment" class="project-link" target="_blank" rel="noopener noreferrer">GitHub ↗</a>
+          </div>
+          <p class="project-desc">
+            AI 開発をすぐに始められる Docker ベースの開発環境。コンテナとシェルスクリプトで再現性のあるセットアップを自動化します。（Docker / Shell Script）
+          </p>
+        </div>
+        <div class="project-item sub">
+          <div class="project-head">
+            <span class="project-badge sub">補助</span>
+            <h4>my-first-ai-app</h4>
+            <a href="https://github.com/izumacha/my-first-ai-app" class="project-link" target="_blank" rel="noopener noreferrer">GitHub ↗</a>
+          </div>
+          <p class="project-desc">
+            日常生活の疑問に AI がチャットで回答する「AI 暮らしアシスタント」。Claude API を用いた初めての AI アプリ。（Next.js / TypeScript）
+          </p>
+        </div>
+        <div class="project-item sub">
+          <div class="project-head">
+            <span class="project-badge sub">補助</span>
+            <h4>automation</h4>
+            <a href="https://github.com/izumacha/automation" class="project-link" target="_blank" rel="noopener noreferrer">GitHub ↗</a>
+          </div>
+          <p class="project-desc">
+            時刻指定でリマインドする GUI デスクトップアプリ。macOS・Linux に対応。（Python / tkinter）
+          </p>
         </div>
       </div>
     </section>

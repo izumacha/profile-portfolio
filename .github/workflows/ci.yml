@@ -55,3 +55,16 @@ jobs:
       - name: Run visual regression tests
         run: npm run test:e2e
 
+      # On failure, upload the (re)generated snapshots and the Playwright diff
+      # report so baselines can be refreshed when the layout changes.
+      - name: Upload Playwright snapshots and report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-snapshots
+          path: |
+            e2e/**/*.png
+            test-results/
+          retention-days: 7
+          if-no-files-found: ignore
+

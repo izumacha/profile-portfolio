@@ -1,0 +1,167 @@
+name: Update Portfolio Data
+
+# プロジェクトカードの「自己証明」データ（CI 状態・最終コミット・言語・テスト数）を
+# 各リポジトリの GitHub API から取得し、data/portfolio.json に焼き込んでコミットする。
+# ブラウザは生成済みの静的 JSON を fetch するだけなので、サイト側はノービルドのまま。
+# （このワークフロー内のスクリプトはサイトの成果物ではないため no-build 原則に抵触しない）
+
+on:
+  # 日次で自動更新（UTC 21:00 = JST 翌 06:00）
+  schedule:
+    - cron: "0 21 * * *"
+  # Actions タブから手動実行も可能にする
+  workflow_dispatch:
+
+# GITHUB_TOKEN にコミット/プッシュ権限を付与（最小権限）
+permissions:
+  contents: write
+
+jobs:
+  update-data:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build data/portfolio.json
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require("fs");
+            const path = "data/portfolio.json";
+
+            // 既存 JSON を読み込む（取得失敗時に前回値を保持して fail-safe にするため）
+            const prev = JSON.parse(fs.readFileSync(path, "utf8"));
+
+            // 対象リポジトリ（owner/repo 形式）。順序は portfolio.json と対応させる
+            const TARGETS = [
+              { key: "helpdesk-hub", owner: "izumacha", repo: "helpdesk-hub" },
+              { key: "incident-insight", owner: "izumacha", repo: "incident-insight" },
+              { key: "AI-Docker-Environment", owner: "izumacha", repo: "AI-Docker-Environment" },
+              { key: "profile-portfolio", owner: "izumacha", repo: "profile-portfolio" },
+            ];
+
+            // 1 リポジトリ分のライブデータを取得する。失敗したら null を返し、呼び出し側で前回値を使う
+            async function fetchRepo(t) {
+              // 既定ブランチ名を取得（main/master 揺れに対応）
+              const repoInfo = await github.rest.repos.get({ owner: t.owner, repo: t.repo });
+              const branch = repoInfo.data.default_branch;
+
+              // 既定ブランチ最新コミットを取得
+              const commits = await github.rest.repos.listCommits({
+                owner: t.owner,
+                repo: t.repo,
+                sha: branch,
+                per_page: 1,
+              });
+              const head = commits.data[0];
+              const sha = head ? head.sha : "";
+              const last_commit = {
+                iso: head ? head.commit.author.date : "",
+                sha7: sha ? sha.slice(0, 7) : "",
+                url: head ? head.html_url : "",
+              };
+
+              // 最新のワークフロー実行（CI）の結論と実行ページ URL を取得
+              let ci = { status: "none", run_url: "", branch };
+              try {
+                const runs = await github.rest.actions.listWorkflowRunsForRepo({
+                  owner: t.owner,
+                  repo: t.repo,
+                  branch,
+                  per_page: 1,
+                });
+                const run = runs.data.workflow_runs && runs.data.workflow_runs[0];
+                if (run) {
+                  // 進行中（conclusion 未確定）は in_progress、完了済みは conclusion（success/failure 等）を正直に出す
+                  const status = run.conclusion || (run.status === "completed" ? "none" : "in_progress");
+                  ci = { status, run_url: run.html_url, branch };
+                }
+              } catch (e) {
+                // Actions が無効なリポジトリ等。CI は none のまま
+                core.warning(`${t.key}: workflow runs 取得失敗: ${e.message}`);
+              }
+
+              // 言語構成を取得し、バイト数の多い順に上位を並べる
+              let languages = [];
+              try {
+                const langs = await github.rest.repos.listLanguages({ owner: t.owner, repo: t.repo });
+                languages = Object.entries(langs.data)
+                  .sort((a, b) => b[1] - a[1])
+                  .map(([name]) => name);
+              } catch (e) {
+                core.warning(`${t.key}: languages 取得失敗: ${e.message}`);
+              }
+
+              // 既定ブランチの Git ツリーを再帰取得し、テストらしきファイル数を概算する
+              let test_file_count = null;
+              try {
+                const tree = await github.rest.git.getTree({
+                  owner: t.owner,
+                  repo: t.repo,
+                  tree_sha: branch,
+                  recursive: "true",
+                });
+                // パスに test/spec を含むファイル（blob）を数える。簡易ヒューリスティック
+                const re = /(^|\/)(tests?|e2e|__tests__)\//i;
+                const re2 = /\.(test|spec)\.[a-z]+$/i;
+                test_file_count = tree.data.tree.filter(
+                  (n) => n.type === "blob" && (re.test(n.path) || re2.test(n.path)),
+                ).length;
+              } catch (e) {
+                core.warning(`${t.key}: tree 取得失敗: ${e.message}`);
+              }
+
+              return {
+                key: t.key,
+                name: (prev.repos.find((r) => r.key === t.key) || {}).name || t.repo,
+                url: `https://github.com/${t.owner}/${t.repo}`,
+                ci,
+                last_commit,
+                languages,
+                test_file_count,
+                stale: false,
+              };
+            }
+
+            // 各リポジトリを順番に処理。失敗したリポジトリは前回値を保持し stale:true を立てる
+            const repos = [];
+            for (const t of TARGETS) {
+              const fallback = prev.repos.find((r) => r.key === t.key) || { key: t.key };
+              try {
+                repos.push(await fetchRepo(t));
+              } catch (e) {
+                core.warning(`${t.key}: 取得全体に失敗、前回値を保持: ${e.message}`);
+                repos.push({ ...fallback, stale: true });
+              }
+            }
+
+            // 新しい JSON を組み立てる。site_quality は前回値を引き継ぐ（本ワークフローでは更新しない）
+            const out = {
+              generated_at: new Date().toISOString(),
+              repos,
+              site_quality: prev.site_quality || {
+                lighthouse: null,
+                visual_regression: null,
+                links: null,
+                html_validate: null,
+              },
+            };
+
+            // 末尾改行付きで書き戻す
+            fs.writeFileSync(path, JSON.stringify(out, null, 2) + "\n");
+            core.info("data/portfolio.json を更新しました");
+
+      - name: Commit if changed
+        run: |
+          # generated_at は毎回変わるため、それ以外に差分があるかを判定する。
+          # ただし簡潔さを優先し data/portfolio.json 全体の差分有無で判定する。
+          if git diff --quiet -- data/portfolio.json; then
+            echo "差分なし: コミットをスキップします"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add data/portfolio.json
+            git commit -m "chore: refresh portfolio self-proof data"
+            git push origin HEAD:${{ github.ref_name }}
+          fi

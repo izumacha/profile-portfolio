@@ -1,0 +1,51 @@
+{
+  "generated_at": "2026-06-06T22:28:45Z",
+  "repos": [
+    {
+      "key": "helpdesk-hub",
+      "name": "HelpDesk Hub",
+      "url": "https://github.com/izumacha/helpdesk-hub",
+      "ci": { "status": "none", "run_url": "", "branch": "main" },
+      "last_commit": { "iso": "", "sha7": "", "url": "" },
+      "languages": [],
+      "test_file_count": null,
+      "stale": true
+    },
+    {
+      "key": "incident-insight",
+      "name": "IncidentInsight",
+      "url": "https://github.com/izumacha/incident-insight",
+      "ci": { "status": "none", "run_url": "", "branch": "main" },
+      "last_commit": { "iso": "", "sha7": "", "url": "" },
+      "languages": [],
+      "test_file_count": null,
+      "stale": true
+    },
+    {
+      "key": "AI-Docker-Environment",
+      "name": "AI-Docker-Environment",
+      "url": "https://github.com/izumacha/AI-Docker-Environment",
+      "ci": { "status": "none", "run_url": "", "branch": "main" },
+      "last_commit": { "iso": "", "sha7": "", "url": "" },
+      "languages": [],
+      "test_file_count": null,
+      "stale": true
+    },
+    {
+      "key": "profile-portfolio",
+      "name": "profile-portfolio",
+      "url": "https://github.com/izumacha/profile-portfolio",
+      "ci": { "status": "none", "run_url": "", "branch": "main" },
+      "last_commit": { "iso": "", "sha7": "", "url": "" },
+      "languages": [],
+      "test_file_count": null,
+      "stale": true
+    }
+  ],
+  "site_quality": {
+    "lighthouse": null,
+    "visual_regression": null,
+    "links": null,
+    "html_validate": null
+  }
+}

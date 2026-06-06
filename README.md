@@ -56,5 +56,3 @@ npx http-server
 ## ライセンス
 
 MIT License
-</content>
-</invoke>

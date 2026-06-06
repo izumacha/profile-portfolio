@@ -3,6 +3,29 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <!--
+      Content-Security-Policy (defense-in-depth, issue #15). GitHub Pages cannot
+      set HTTP response headers, so the policy is delivered via this meta tag.
+      script-src uses a SHA-256 hash of the single inline script element at the
+      end of body instead of 'unsafe-inline', so injected scripts cannot run.
+      NOTE: if you edit that inline script, regenerate the hash by computing
+      base64(SHA-256(exact text between the script open and close tags)) and
+      replacing the sha256-... token below. The JSON-LD block (type
+      application/ld+json) is data, not executed, so it is not governed by
+      script-src. style-src keeps 'unsafe-inline' because the inline style block
+      and one style="" attribute cannot be hashed here; style injection is far
+      lower risk than script injection. Limitation: frame-ancestors /
+      X-Frame-Options and X-Content-Type-Options are header-only (ignored in a
+      meta tag), so clickjacking / nosniff hardening needs a real HTTP header,
+      which GitHub Pages cannot set (tracked separately).
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'sha256-Rl66tKYGsuXdv0WY4sp73Dji7iE3dExIA0ibkRGWrOU='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'"
+    />
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
+
     <title>Masaki Izumi | Full-Stack Engineer</title>
     <meta
       name="description"

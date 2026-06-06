@@ -3,6 +3,21 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <!--
+    Content-Security-Policy (defense-in-depth, issue #15). Delivered via meta
+    because GitHub Pages cannot set HTTP headers. This page has NO <script>, so
+    script-src is 'none' (strictest). style-src keeps 'unsafe-inline' for the
+    single inline <style> block; this page loads no external resources, so
+    default-src 'self' covers the rest. frame-ancestors / X-Frame-Options /
+    X-Content-Type-Options are header-only and cannot be set here.
+  -->
+  <meta
+    http-equiv="Content-Security-Policy"
+    content="default-src 'self'; script-src 'none'; style-src 'self' 'unsafe-inline'; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'"
+  />
+  <meta name="referrer" content="strict-origin-when-cross-origin" />
+
   <title>履歴書 - 泉将貴</title>
   <meta name="description" content="泉将貴の履歴書ページ。職務要約・スキル・学習歴・資格を掲載しています。" />
   <link rel="canonical" href="https://izumacha.github.io/profile-portfolio/resume.html" />

@@ -949,6 +949,134 @@
         }
       }
 
+      /* Works Section */
+      .works-group {
+        margin-bottom: 3.5rem;
+      }
+
+      .works-group:last-child {
+        margin-bottom: 0;
+      }
+
+      .works-group-title {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        font-size: 1.15rem;
+        font-weight: 700;
+        color: var(--text-secondary);
+        margin-bottom: 1.5rem;
+      }
+
+      .works-group-title::before {
+        content: "";
+        width: 28px;
+        height: 3px;
+        border-radius: 2px;
+        background: var(--gradient-1);
+      }
+
+      .works-group-note {
+        font-size: 0.85rem;
+        font-weight: 400;
+        color: var(--text-muted);
+      }
+
+      .works-container {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        gap: 2rem;
+      }
+
+      .work-card {
+        display: flex;
+        flex-direction: column;
+        background: var(--bg-card);
+        border-radius: 20px;
+        padding: 2rem;
+        border: 1px solid var(--border);
+        transition: all 0.4s ease;
+        position: relative;
+        overflow: hidden;
+      }
+
+      .work-card::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 4px;
+        background: var(--gradient-1);
+        transform: scaleX(0);
+        transition: transform 0.4s ease;
+      }
+
+      .work-card.featured::before {
+        transform: scaleX(1);
+      }
+
+      .work-card:hover {
+        transform: translateY(-8px);
+        border-color: rgba(99, 102, 241, 0.3);
+        box-shadow: var(--shadow-glow);
+      }
+
+      .work-card:hover::before {
+        transform: scaleX(1);
+      }
+
+      .work-card-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        margin-bottom: 1rem;
+      }
+
+      .work-badge {
+        padding: 0.3rem 0.9rem;
+        border-radius: 50px;
+        font-size: 0.75rem;
+        font-weight: 700;
+        letter-spacing: 0.05em;
+        background: var(--gradient-1);
+        color: #fff;
+      }
+
+      .work-badge.sub {
+        background: rgba(148, 163, 184, 0.15);
+        color: var(--text-muted);
+        border: 1px solid var(--border);
+      }
+
+      .work-repo {
+        font-size: 0.85rem;
+        font-weight: 600;
+        color: var(--primary-light);
+        text-decoration: none;
+        transition: color 0.3s ease;
+      }
+
+      .work-repo:hover {
+        color: var(--accent);
+      }
+
+      .work-card h3 {
+        font-size: 1.3rem;
+        font-weight: 700;
+        color: var(--text-primary);
+        margin-bottom: 0.75rem;
+      }
+
+      .work-desc {
+        flex: 1;
+        font-size: 0.95rem;
+        line-height: 1.7;
+        color: var(--text-muted);
+        margin-bottom: 1.5rem;
+      }
+
       /* Utility Classes */
       .text-gradient {
         background: var(--gradient-1);
@@ -968,6 +1096,7 @@
         <ul class="nav-links">
           <li><a href="#about">About</a></li>
           <li><a href="#skills">Skills</a></li>
+          <li><a href="#works">Works</a></li>
           <li><a href="#certifications">Certifications</a></li>
           <li><a href="#timeline">Timeline</a></li>
           <li><a href="#contact">Contact</a></li>
@@ -1110,6 +1239,149 @@
               <span class="skill-tag">Excel</span>
               <span class="skill-tag">VS Code</span>
             </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Works Section -->
+    <section id="works" class="section">
+      <div class="container">
+        <div class="section-header">
+          <span class="section-tag">My Works</span>
+          <h2 class="section-title">代表プロジェクト</h2>
+          <p class="section-subtitle">
+            注力している主力プロジェクト 3 本を中心に、学習過程で取り組んだ補助プロジェクトを紹介します
+          </p>
+        </div>
+
+        <div class="works-group">
+          <h3 class="works-group-title">
+            主力プロジェクト
+            <span class="works-group-note">― 力を入れて開発している代表作</span>
+          </h3>
+          <div class="works-container">
+            <article class="work-card featured">
+              <div class="work-card-head">
+                <span class="work-badge">主力</span>
+                <a
+                  href="https://github.com/izumacha/helpdesk-hub"
+                  class="work-repo"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  >GitHub ↗</a
+                >
+              </div>
+              <h3>helpdesk-hub</h3>
+              <p class="work-desc">
+                社内ヘルプデスク向けのチケット管理システム。問い合わせの起票・対応状況の追跡・担当割り当てを一元管理し、サポート業務を効率化します。
+              </p>
+              <div class="skill-tags">
+                <span class="skill-tag">Next.js 15</span>
+                <span class="skill-tag">TypeScript</span>
+                <span class="skill-tag">Prisma</span>
+                <span class="skill-tag">React</span>
+                <span class="skill-tag">Tailwind CSS</span>
+              </div>
+            </article>
+
+            <article class="work-card featured">
+              <div class="work-card-head">
+                <span class="work-badge">主力</span>
+                <a
+                  href="https://github.com/izumacha/incident-insight"
+                  class="work-repo"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  >GitHub ↗</a
+                >
+              </div>
+              <h3>incident-insight</h3>
+              <p class="work-desc">
+                医療現場のインシデントを記録・分析し、患者安全の向上と再発防止につなげるトラッキングシステム。傾向の可視化に取り組んでいます。
+              </p>
+              <div class="skill-tags">
+                <span class="skill-tag">C#</span>
+                <span class="skill-tag">ASP.NET Core</span>
+                <span class="skill-tag">Entity Framework</span>
+                <span class="skill-tag">Docker</span>
+              </div>
+            </article>
+
+            <article class="work-card featured">
+              <div class="work-card-head">
+                <span class="work-badge">主力</span>
+                <a
+                  href="https://github.com/izumacha/AI-Docker-Environment"
+                  class="work-repo"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  >GitHub ↗</a
+                >
+              </div>
+              <h3>AI-Docker-Environment</h3>
+              <p class="work-desc">
+                AI 開発をすぐに始められる Docker ベースの開発環境。コンテナとシェルスクリプトで構築を自動化し、再現性のあるセットアップを実現します。
+              </p>
+              <div class="skill-tags">
+                <span class="skill-tag">Docker</span>
+                <span class="skill-tag">Shell Script</span>
+                <span class="skill-tag">AI / LLM</span>
+              </div>
+            </article>
+          </div>
+        </div>
+
+        <div class="works-group">
+          <h3 class="works-group-title">
+            補助プロジェクト
+            <span class="works-group-note">― 学習過程で取り組んだ作品</span>
+          </h3>
+          <div class="works-container">
+            <article class="work-card">
+              <div class="work-card-head">
+                <span class="work-badge sub">補助</span>
+                <a
+                  href="https://github.com/izumacha/my-first-ai-app"
+                  class="work-repo"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  >GitHub ↗</a
+                >
+              </div>
+              <h3>my-first-ai-app</h3>
+              <p class="work-desc">
+                日常生活の疑問に AI がチャットで回答する「AI 暮らしアシスタント」。Claude API を用いた初めての AI アプリです。
+              </p>
+              <div class="skill-tags">
+                <span class="skill-tag">Next.js</span>
+                <span class="skill-tag">TypeScript</span>
+                <span class="skill-tag">Claude API</span>
+                <span class="skill-tag">Tailwind CSS</span>
+              </div>
+            </article>
+
+            <article class="work-card">
+              <div class="work-card-head">
+                <span class="work-badge sub">補助</span>
+                <a
+                  href="https://github.com/izumacha/automation"
+                  class="work-repo"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  >GitHub ↗</a
+                >
+              </div>
+              <h3>automation</h3>
+              <p class="work-desc">
+                時刻指定でリマインドする GUI デスクトップアプリ。Python / tkinter で実装し、macOS・Linux に対応しています。
+              </p>
+              <div class="skill-tags">
+                <span class="skill-tag">Python</span>
+                <span class="skill-tag">tkinter</span>
+                <span class="skill-tag">Desktop App</span>
+              </div>
+            </article>
           </div>
         </div>
       </div>
@@ -1356,7 +1628,7 @@
 
       document
         .querySelectorAll(
-          ".skill-card, .cert-card, .timeline-item, .contact-card, .stat-item"
+          ".skill-card, .work-card, .cert-card, .timeline-item, .contact-card, .stat-item"
         )
         .forEach((el) => {
           el.style.opacity = "0";

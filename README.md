@@ -26,7 +26,7 @@
 | プロジェクト | 概要 | 主な技術 |
 |---|---|---|
 | [my-first-ai-app](https://github.com/izumacha/my-first-ai-app) | 日常生活の疑問に AI がチャットで回答する「AI 暮らしアシスタント」。 | Next.js / TypeScript / Claude API / Tailwind CSS |
-| [automation](https://github.com/izumacha/automation) | 時刻指定リマインダー GUI アプリ（macOS・Linux 対応）。 | Python / tkinter / Desktop App |
+| [my-task-manager](https://github.com/izumacha/my-task-manager) | 時刻指定リマインダー GUI アプリ（macOS・Linux 対応）。 | Python / tkinter / Desktop App |
 
 ## 技術スタック
 

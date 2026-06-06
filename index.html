@@ -1077,6 +1077,83 @@
         margin-bottom: 1.5rem;
       }
 
+      /* Live self-proof badges (CI 状態・最終コミット・言語をライブ表示) */
+      :root {
+        /* バッジ用の色トークン（CSS 変数経由・直書き禁止の方針に準拠） */
+        --badge-bg: rgba(148, 163, 184, 0.12);
+        --badge-border: var(--border);
+        --status-success: var(--accent-green);
+        --status-failure: #ef4444;
+        --status-neutral: var(--text-muted);
+        --status-running: var(--accent);
+      }
+
+      .work-proof {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        margin-bottom: 1rem;
+        align-items: center;
+      }
+
+      .work-proof:empty {
+        /* データ未取得（fail-safe フォールバック）時は余白を出さない */
+        display: none;
+      }
+
+      .proof-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        padding: 0.3rem 0.8rem;
+        border-radius: 50px;
+        font-size: 0.78rem;
+        font-weight: 600;
+        text-decoration: none;
+        background: var(--badge-bg);
+        border: 1px solid var(--badge-border);
+        color: var(--text-secondary);
+        transition: all 0.3s ease;
+      }
+
+      a.proof-badge:hover {
+        transform: translateY(-2px);
+        border-color: rgba(99, 102, 241, 0.4);
+      }
+
+      .proof-badge .proof-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        flex-shrink: 0;
+        background: var(--status-neutral);
+      }
+
+      .proof-badge.is-success .proof-dot {
+        background: var(--status-success);
+      }
+      .proof-badge.is-failure .proof-dot {
+        background: var(--status-failure);
+      }
+      .proof-badge.is-running .proof-dot {
+        background: var(--status-running);
+      }
+
+      .proof-badge.is-success {
+        color: var(--accent-green);
+        border-color: rgba(16, 185, 129, 0.35);
+      }
+      .proof-badge.is-failure {
+        color: #fca5a5;
+        border-color: rgba(239, 68, 68, 0.35);
+      }
+
+      .work-proof-meta {
+        font-size: 0.72rem;
+        color: var(--text-muted);
+        flex-basis: 100%;
+      }
+
       /* Utility Classes */
       .text-gradient {
         background: var(--gradient-1);
@@ -1261,7 +1338,7 @@
             <span class="works-group-note">― 力を入れて開発している代表作</span>
           </h3>
           <div class="works-container">
-            <article class="work-card featured">
+            <article class="work-card featured" data-repo-key="helpdesk-hub">
               <div class="work-card-head">
                 <span class="work-badge">主力</span>
                 <a
@@ -1273,6 +1350,7 @@
                 >
               </div>
               <h4>helpdesk-hub</h4>
+              <div class="work-proof" data-proof></div>
               <p class="work-desc">
                 社内ヘルプデスク向けのチケット管理システム。問い合わせの起票・対応状況の追跡・担当割り当てを一元管理し、サポート業務を効率化します。
               </p>
@@ -1285,7 +1363,7 @@
               </div>
             </article>
 
-            <article class="work-card featured">
+            <article class="work-card featured" data-repo-key="incident-insight">
               <div class="work-card-head">
                 <span class="work-badge">主力</span>
                 <a
@@ -1297,6 +1375,7 @@
                 >
               </div>
               <h4>incident-insight</h4>
+              <div class="work-proof" data-proof></div>
               <p class="work-desc">
                 医療現場のインシデントを記録・分析し、患者安全の向上と再発防止につなげるトラッキングシステム。傾向の可視化に取り組んでいます。
               </p>
@@ -1308,7 +1387,7 @@
               </div>
             </article>
 
-            <article class="work-card featured">
+            <article class="work-card featured" data-repo-key="AI-Docker-Environment">
               <div class="work-card-head">
                 <span class="work-badge">主力</span>
                 <a
@@ -1320,6 +1399,7 @@
                 >
               </div>
               <h4>AI-Docker-Environment</h4>
+              <div class="work-proof" data-proof></div>
               <p class="work-desc">
                 AI 開発をすぐに始められる Docker ベースの開発環境。コンテナとシェルスクリプトで構築を自動化し、再現性のあるセットアップを実現します。
               </p>
@@ -1628,7 +1708,7 @@
 
       document
         .querySelectorAll(
-          ".skill-card, .work-card, .cert-card, .timeline-item, .contact-card, .stat-item"
+          ".skill-card, .work-card, .cert-card, .timeline-item, .contact-card, .stat-item, .work-proof"
         )
         .forEach((el) => {
           el.style.opacity = "0";
@@ -1636,6 +1716,148 @@
           el.style.transition = "all 0.6s ease";
           observer.observe(el);
         });
+
+      // ---- Live self-proof: 焼き込み JSON でプロジェクトカードに本物の CI/コミット/言語を描画 ----
+      (function () {
+        // CI 結論コードを「色クラス・日本語ラベル」に対応づける表
+        const CI_LABELS = {
+          success: { cls: "is-success", label: "CI 成功" },
+          failure: { cls: "is-failure", label: "CI 失敗" },
+          cancelled: { cls: "is-failure", label: "CI 中止" },
+          timed_out: { cls: "is-failure", label: "CI タイムアウト" },
+          in_progress: { cls: "is-running", label: "CI 実行中" },
+          none: { cls: "", label: "CI 情報なし" },
+        };
+
+        // ISO 日時を「YYYY/MM/DD」形式に整形する（空文字や不正値は null を返す）
+        function formatDate(iso) {
+          if (!iso) return null; // 値が無ければ整形しない
+          const d = new Date(iso); // 文字列を Date に変換
+          if (isNaN(d.getTime())) return null; // パース失敗ならスキップ
+          // ゼロ埋めした年月日を組み立てる（%-d 等の非移植指定子は使わない）
+          const y = d.getFullYear();
+          const m = String(d.getMonth() + 1).padStart(2, "0");
+          const day = String(d.getDate()).padStart(2, "0");
+          return `${y}/${m}/${day}`;
+        }
+
+        // テキスト用の安全なバッジ要素（span）を作る
+        function makeSpanBadge(text, extraCls) {
+          const el = document.createElement("span"); // span 要素を生成
+          el.className = "proof-badge" + (extraCls ? " " + extraCls : ""); // クラスを付与
+          const dot = document.createElement("span"); // 状態ドット
+          dot.className = "proof-dot";
+          el.appendChild(dot); // ドットを先頭に追加
+          el.appendChild(document.createTextNode(text)); // ラベルテキストを追加
+          return el;
+        }
+
+        // URL が http(s) スキームのみかを検証する（javascript:/data: 等の注入を防ぐ防御層）
+        function isSafeHttpUrl(href) {
+          if (!href) return false; // 空なら不可
+          try {
+            const u = new URL(href, location.href); // 相対も解決して URL として解釈
+            return u.protocol === "https:" || u.protocol === "http:"; // 許可スキームのみ true
+          } catch (e) {
+            return false; // パースできない値はリンクにしない
+          }
+        }
+
+        // リンク付きの安全なバッジ要素（a）を作る。textContent 経由で XSS を防ぐ。
+        // 万一 href が安全でない（http/https 以外）場合はリンクにせず span にフォールバックする。
+        function makeLinkBadge(text, href, extraCls) {
+          // 安全な http(s) URL でなければリンク化せずテキストバッジにする（fail-safe）
+          if (!isSafeHttpUrl(href)) return makeSpanBadge(text, extraCls);
+          const el = document.createElement("a"); // a 要素を生成
+          el.className = "proof-badge" + (extraCls ? " " + extraCls : ""); // クラスを付与
+          el.href = href; // 検証済みの本物の CI/コミット URL を設定
+          el.target = "_blank"; // 別タブで開く
+          el.rel = "noopener noreferrer"; // 規約どおりのセキュリティ属性
+          const dot = document.createElement("span"); // 状態ドット
+          dot.className = "proof-dot";
+          el.appendChild(dot); // ドットを先頭に追加
+          el.appendChild(document.createTextNode(text)); // ラベルテキストを追加
+          return el;
+        }
+
+        // 1 枚のカードに対応する repo データでバッジ群を描画する
+        function renderCard(card, repo, generatedAt) {
+          const container = card.querySelector("[data-proof]"); // バッジを入れる箱
+          if (!container || !repo) return; // 箱や対応データが無ければ何もしない（fail-safe）
+          container.textContent = ""; // 念のため中身を初期化
+
+          // --- CI 状態バッジ（本物の実行 URL へリンク） ---
+          const ci = repo.ci || {}; // CI 情報（無い場合に備える）
+          const ciMeta = CI_LABELS[ci.status] || CI_LABELS.none; // 状態に対応する色/ラベル
+          if (ci.run_url) {
+            // 実行 URL があれば監査可能なリンクバッジにする
+            container.appendChild(makeLinkBadge(ciMeta.label, ci.run_url, ciMeta.cls));
+          } else {
+            // URL が無い（未走行など）場合はリンク無しのバッジ
+            container.appendChild(makeSpanBadge(ciMeta.label, ciMeta.cls));
+          }
+
+          // --- 最終コミットバッジ（本物のコミット URL へリンク） ---
+          const commit = repo.last_commit || {}; // コミット情報
+          const dateText = formatDate(commit.iso); // 日付を整形
+          if (dateText) {
+            const label = "最終 " + dateText; // 表示ラベル
+            if (commit.url) {
+              container.appendChild(makeLinkBadge(label, commit.url, "")); // URL ありはリンク
+            } else {
+              container.appendChild(makeSpanBadge(label, "")); // URL 無しは span
+            }
+          }
+
+          // --- 主要言語バッジ（先頭 1 件のみ控えめに表示） ---
+          if (Array.isArray(repo.languages) && repo.languages.length > 0) {
+            container.appendChild(makeSpanBadge(repo.languages[0], "")); // 最も多い言語を表示
+          }
+
+          // --- 最終検証日時（generated_at）を控えめに添える ---
+          const verified = formatDate(generatedAt); // 焼き込み生成日時を整形
+          if (verified) {
+            const meta = document.createElement("span"); // メタ表示用 span
+            meta.className = "work-proof-meta"; // 控えめなスタイル
+            // stale（前回値保持）なら正直にその旨を添える
+            meta.textContent = "最終検証: " + verified + (repo.stale ? "（更新待ち）" : "");
+            container.appendChild(meta);
+          }
+        }
+
+        // 焼き込み JSON を取得して全カードへ反映する。失敗時は素のカードのままにする（fail-safe）
+        function init() {
+          fetch("data/portfolio.json", { cache: "no-cache" }) // 静的 JSON を取得
+            .then(function (res) {
+              if (!res.ok) throw new Error("HTTP " + res.status); // 異常応答は例外化
+              return res.json(); // JSON をパース
+            })
+            .then(function (data) {
+              const repos = (data && data.repos) || []; // repo 配列（無ければ空）
+              const generatedAt = data && data.generated_at; // 生成日時
+              // key → repo の対応表を作る
+              const byKey = {};
+              repos.forEach(function (r) {
+                byKey[r.key] = r;
+              });
+              // data-repo-key を持つ各カードへ描画する
+              document.querySelectorAll(".work-card[data-repo-key]").forEach(function (card) {
+                const key = card.getAttribute("data-repo-key"); // 対応キーを取得
+                renderCard(card, byKey[key], generatedAt); // 該当データで描画
+              });
+            })
+            .catch(function () {
+              // 取得失敗・JSON 不正時は何もしない＝素のカード表示にフォールバック
+            });
+        }
+
+        // DOM 構築済みなら即実行、そうでなければ読み込み完了を待つ
+        if (document.readyState === "loading") {
+          document.addEventListener("DOMContentLoaded", init);
+        } else {
+          init();
+        }
+      })();
     </script>
   </body>
 </html>

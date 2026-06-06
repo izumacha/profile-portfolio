@@ -7,11 +7,6 @@ name: Update Playwright Snapshots
 # same Linux runner the `visual-regression` job uses.
 on:
   workflow_dispatch:
-  # Temporary bootstrap trigger to generate the initial Linux baseline on this
-  # branch. Removed once the baseline is committed.
-  push:
-    branches:
-      - claude/portfolio-nav-cleanup-VBUia
 
 permissions:
   contents: write

@@ -1,45 +1,94 @@
 {
-  "generated_at": "2026-06-06T22:28:45Z",
+  "generated_at": "2026-06-07T21:57:23.546Z",
   "repos": [
     {
       "key": "helpdesk-hub",
       "name": "HelpDesk Hub",
       "url": "https://github.com/izumacha/helpdesk-hub",
-      "ci": { "status": "none", "run_url": "", "branch": "main" },
-      "last_commit": { "iso": "", "sha7": "", "url": "" },
-      "languages": [],
-      "test_file_count": null,
-      "stale": true
+      "ci": {
+        "status": "success",
+        "run_url": "https://github.com/izumacha/helpdesk-hub/actions/runs/27094589677",
+        "branch": "main"
+      },
+      "last_commit": {
+        "iso": "2026-06-07T13:57:00Z",
+        "sha7": "12807c1",
+        "url": "https://github.com/izumacha/helpdesk-hub/commit/12807c18e6e97da4a804d10b5d8979343d3c3e50"
+      },
+      "languages": [
+        "TypeScript",
+        "Dockerfile",
+        "JavaScript",
+        "CSS"
+      ],
+      "test_file_count": 33,
+      "stale": false
     },
     {
       "key": "incident-insight",
       "name": "IncidentInsight",
       "url": "https://github.com/izumacha/incident-insight",
-      "ci": { "status": "none", "run_url": "", "branch": "main" },
-      "last_commit": { "iso": "", "sha7": "", "url": "" },
-      "languages": [],
-      "test_file_count": null,
-      "stale": true
+      "ci": {
+        "status": "success",
+        "run_url": "https://github.com/izumacha/incident-insight/actions/runs/27096458743",
+        "branch": "main"
+      },
+      "last_commit": {
+        "iso": "2026-06-07T15:15:23Z",
+        "sha7": "56a1efc",
+        "url": "https://github.com/izumacha/incident-insight/commit/56a1efc8e261708aeee051e57bbbd70e1460e6c5"
+      },
+      "languages": [
+        "C#",
+        "HTML",
+        "CSS",
+        "TypeScript",
+        "Dockerfile"
+      ],
+      "test_file_count": 20,
+      "stale": false
     },
     {
       "key": "AI-Docker-Environment",
       "name": "AI-Docker-Environment",
       "url": "https://github.com/izumacha/AI-Docker-Environment",
-      "ci": { "status": "none", "run_url": "", "branch": "main" },
-      "last_commit": { "iso": "", "sha7": "", "url": "" },
-      "languages": [],
-      "test_file_count": null,
-      "stale": true
+      "ci": {
+        "status": "skipped",
+        "run_url": "https://github.com/izumacha/AI-Docker-Environment/actions/runs/27096432073",
+        "branch": "main"
+      },
+      "last_commit": {
+        "iso": "2026-06-07T15:13:20Z",
+        "sha7": "c63bc1e",
+        "url": "https://github.com/izumacha/AI-Docker-Environment/commit/c63bc1ec4831a87f26ba94551438538a689ed89a"
+      },
+      "languages": [
+        "Shell",
+        "Dockerfile"
+      ],
+      "test_file_count": 1,
+      "stale": false
     },
     {
       "key": "profile-portfolio",
       "name": "profile-portfolio",
       "url": "https://github.com/izumacha/profile-portfolio",
-      "ci": { "status": "none", "run_url": "", "branch": "main" },
-      "last_commit": { "iso": "", "sha7": "", "url": "" },
-      "languages": [],
-      "test_file_count": null,
-      "stale": true
+      "ci": {
+        "status": "success",
+        "run_url": "https://github.com/izumacha/profile-portfolio/actions/runs/27096407821",
+        "branch": "main"
+      },
+      "last_commit": {
+        "iso": "2026-06-07T15:13:17Z",
+        "sha7": "a2f462a",
+        "url": "https://github.com/izumacha/profile-portfolio/commit/a2f462a03c91689673cfa7b31761f66f96a84f2a"
+      },
+      "languages": [
+        "HTML",
+        "TypeScript"
+      ],
+      "test_file_count": 3,
+      "stale": false
     }
   ],
   "site_quality": {

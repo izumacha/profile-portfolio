@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-06-08T22:18:37.335Z",
+  "generated_at": "2026-06-09T22:17:22.734Z",
   "repos": [
     {
       "key": "helpdesk-hub",
@@ -53,8 +53,8 @@
       "name": "AI-Docker-Environment",
       "url": "https://github.com/izumacha/AI-Docker-Environment",
       "ci": {
-        "status": "skipped",
-        "run_url": "https://github.com/izumacha/AI-Docker-Environment/actions/runs/27096432073",
+        "status": "failure",
+        "run_url": "https://github.com/izumacha/AI-Docker-Environment/actions/runs/27239093754",
         "branch": "main"
       },
       "last_commit": {
@@ -74,14 +74,14 @@
       "name": "profile-portfolio",
       "url": "https://github.com/izumacha/profile-portfolio",
       "ci": {
-        "status": "failure",
-        "run_url": "https://github.com/izumacha/profile-portfolio/actions/runs/27146632530",
+        "status": "none",
+        "run_url": "",
         "branch": "main"
       },
       "last_commit": {
-        "iso": "2026-06-08T15:00:21Z",
-        "sha7": "b994040",
-        "url": "https://github.com/izumacha/profile-portfolio/commit/b994040fe95aba770da7b6a8b936d13326690c83"
+        "iso": "2026-06-08T22:18:37Z",
+        "sha7": "a39b818",
+        "url": "https://github.com/izumacha/profile-portfolio/commit/a39b8181be1e2d0b3153cc933eabdc16c51356ff"
       },
       "languages": [
         "HTML",

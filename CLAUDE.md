@@ -10,15 +10,26 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 1. プロジェクト概要
 
-個人ポートフォリオサイト（静的 HTML/CSS/JS）。GitHub Pages でホスティングし、ビルドツール・パッケージマネージャは使用しない。コンテンツは日本語で、ルート要素は `lang="ja"`（§7 のアクセシビリティに従う）。
+個人ポートフォリオサイト。サイト本体は手書きの静的 HTML/CSS/JS で、GitHub Pages でホスティングする（ページを生成するビルドステップはなく、`index.html` / `resume.html` をそのまま配信する）。一方で、検証・テスト用に npm ベースの開発ツール（HTML バリデーション・Playwright によるビジュアルリグレッション・Lighthouse CI）と GitHub Actions CI を持つ。コンテンツは日本語で、ルート要素は `lang="ja"`（§7 のアクセシビリティに従う）。
 
 ## 2. コマンド
 
-ビルド不要。以下のいずれかで確認する。
+サイト本体の生成にビルドは不要。表示確認は以下のいずれかで行う。
 
 ```bash
 open index.html                    # ブラウザで直接開く
 python -m http.server 8000         # ローカルサーバーで配信して確認
+```
+
+検証・テストは CI（`.github/workflows/ci.yml` / `lighthouse.yml`）と同じコマンドをローカルで流す（`package-lock.json` があるので `npm ci` を使う）。
+
+```bash
+npm ci                                          # 依存インストール（決定的）
+npx --yes html-validate index.html resume.html  # HTML 構文チェック
+npx playwright install --with-deps chromium      # 初回のみ: E2E 用ブラウザ
+npm run test:e2e                                 # Playwright ビジュアルリグレッション
+npm run test:lighthouse                          # Lighthouse CI（lhci autorun）
+npx playwright test --update-snapshots           # 意図的な見た目変更時にスナップショット更新
 ```
 
 ## 3. アーキテクチャ

@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-06-09T22:17:22.734Z",
+  "generated_at": "2026-06-10T22:46:31.354Z",
   "repos": [
     {
       "key": "helpdesk-hub",
@@ -7,13 +7,13 @@
       "url": "https://github.com/izumacha/helpdesk-hub",
       "ci": {
         "status": "success",
-        "run_url": "https://github.com/izumacha/helpdesk-hub/actions/runs/27094589677",
+        "run_url": "https://github.com/izumacha/helpdesk-hub/actions/runs/27242122628",
         "branch": "main"
       },
       "last_commit": {
-        "iso": "2026-06-07T13:57:00Z",
-        "sha7": "12807c1",
-        "url": "https://github.com/izumacha/helpdesk-hub/commit/12807c18e6e97da4a804d10b5d8979343d3c3e50"
+        "iso": "2026-06-09T23:19:08Z",
+        "sha7": "9bbf945",
+        "url": "https://github.com/izumacha/helpdesk-hub/commit/9bbf945de4768d558e7bbc1c3d11f73e1fc04163"
       },
       "languages": [
         "TypeScript",
@@ -30,13 +30,13 @@
       "url": "https://github.com/izumacha/incident-insight",
       "ci": {
         "status": "success",
-        "run_url": "https://github.com/izumacha/incident-insight/actions/runs/27096458743",
+        "run_url": "https://github.com/izumacha/incident-insight/actions/runs/27242124486",
         "branch": "main"
       },
       "last_commit": {
-        "iso": "2026-06-07T15:15:23Z",
-        "sha7": "56a1efc",
-        "url": "https://github.com/izumacha/incident-insight/commit/56a1efc8e261708aeee051e57bbbd70e1460e6c5"
+        "iso": "2026-06-09T23:19:11Z",
+        "sha7": "31c8787",
+        "url": "https://github.com/izumacha/incident-insight/commit/31c8787b23e536a6a034c472e3ae8addff450297"
       },
       "languages": [
         "C#",
@@ -53,14 +53,14 @@
       "name": "AI-Docker-Environment",
       "url": "https://github.com/izumacha/AI-Docker-Environment",
       "ci": {
-        "status": "failure",
-        "run_url": "https://github.com/izumacha/AI-Docker-Environment/actions/runs/27239093754",
+        "status": "skipped",
+        "run_url": "https://github.com/izumacha/AI-Docker-Environment/actions/runs/27242163934",
         "branch": "main"
       },
       "last_commit": {
-        "iso": "2026-06-07T15:13:20Z",
-        "sha7": "c63bc1e",
-        "url": "https://github.com/izumacha/AI-Docker-Environment/commit/c63bc1ec4831a87f26ba94551438538a689ed89a"
+        "iso": "2026-06-09T23:19:13Z",
+        "sha7": "f597fe0",
+        "url": "https://github.com/izumacha/AI-Docker-Environment/commit/f597fe0287a1bf78a576212be549ad1b8e53fbb2"
       },
       "languages": [
         "Shell",
@@ -74,14 +74,14 @@
       "name": "profile-portfolio",
       "url": "https://github.com/izumacha/profile-portfolio",
       "ci": {
-        "status": "none",
-        "run_url": "",
+        "status": "success",
+        "run_url": "https://github.com/izumacha/profile-portfolio/actions/runs/27242118129",
         "branch": "main"
       },
       "last_commit": {
-        "iso": "2026-06-08T22:18:37Z",
-        "sha7": "a39b818",
-        "url": "https://github.com/izumacha/profile-portfolio/commit/a39b8181be1e2d0b3153cc933eabdc16c51356ff"
+        "iso": "2026-06-09T23:19:01Z",
+        "sha7": "36b36dd",
+        "url": "https://github.com/izumacha/profile-portfolio/commit/36b36dd1242d4b8a31503fcb58674b1256d9b611"
       },
       "languages": [
         "HTML",

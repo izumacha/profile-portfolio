@@ -84,6 +84,15 @@
         --gradient-2: linear-gradient(135deg, #06b6d4 0%, #22d3ee 100%);
         --gradient-3: linear-gradient(135deg, #10b981 0%, #34d399 100%);
         --shadow-glow: 0 0 40px rgba(99, 102, 241, 0.3);
+        /* コードブロック構文ハイライト用の色トークン（直書き禁止の方針に準拠） */
+        --code-keyword: #c792ea;
+        --code-string: #c3e88d;
+        --code-property: #82aaff;
+        --code-bracket: #89ddff;
+        /* フッターのハートアイコン色 */
+        --color-heart: #ef4444;
+        /* CI 失敗バッジのテキスト色 */
+        --color-failure-text: #fca5a5;
       }
 
       * {
@@ -403,6 +412,34 @@
         }
       }
 
+      /* アクセシビリティ: モーション低減設定を尊重する（§7 の prefers-reduced-motion 対応） */
+      @media (prefers-reduced-motion: reduce) {
+        /* 背景アニメーションを止める */
+        .bg-animation::before {
+          animation: none;
+        }
+        /* アバターの浮遊アニメーションを止める */
+        .avatar-container {
+          animation: none;
+        }
+        /* ヒーローセクションのフェードインを止める */
+        .hero-content {
+          animation: none;
+          opacity: 1;
+        }
+        /* スクロールインジケーターのバウンスを止める */
+        .scroll-indicator {
+          animation: none;
+        }
+        /* ホバー時のカード移動を抑制する */
+        .skill-card,
+        .work-card,
+        .cert-card,
+        .contact-card {
+          transition: none;
+        }
+      }
+
       /* Container */
       .container {
         max-width: 1100px;
@@ -525,16 +562,16 @@
       }
 
       .code-block .keyword {
-        color: #c792ea;
+        color: var(--code-keyword);
       }
       .code-block .string {
-        color: #c3e88d;
+        color: var(--code-string);
       }
       .code-block .property {
-        color: #82aaff;
+        color: var(--code-property);
       }
       .code-block .bracket {
-        color: #89ddff;
+        color: var(--code-bracket);
       }
       .code-block .comment {
         color: var(--text-muted);
@@ -720,6 +757,13 @@
       .cert-link:hover {
         background: var(--primary);
         color: white;
+      }
+
+      /* 未リンクの証明バッジ（Verified ラベル等、クリック不可の状態） */
+      .cert-link--disabled {
+        opacity: 0.5;
+        cursor: default;
+        pointer-events: none;
       }
 
       /* Timeline Section */
@@ -911,7 +955,7 @@
       }
 
       .footer-heart {
-        color: #ef4444;
+        color: var(--color-heart);
       }
 
       /* Responsive */
@@ -1167,7 +1211,7 @@
         border-color: rgba(16, 185, 129, 0.35);
       }
       .proof-badge.is-failure {
-        color: #fca5a5;
+        color: var(--color-failure-text);
         border-color: rgba(239, 68, 68, 0.35);
       }
 
@@ -1557,7 +1601,7 @@
               <div class="cert-org">IPA (情報処理推進機構)</div>
               <div class="cert-date">2024年1月9日取得</div>
             </div>
-            <span class="cert-link" style="opacity: 0.5; cursor: default;">Verified</span>
+            <span class="cert-link cert-link--disabled">Verified</span>
           </div>
         </div>
       </div>
@@ -1690,54 +1734,62 @@
     </footer>
 
     <script>
-      // Smooth scroll for navigation links
+      // ナビゲーションリンクのスムーススクロール処理
+      // href が「#」で始まるすべてのリンクを取得して順番に処理する
       document.querySelectorAll('a[href^="#"]').forEach((anchor) => {
+        // クリックイベントを登録する
         anchor.addEventListener("click", function (e) {
-          e.preventDefault();
-          const target = document.querySelector(this.getAttribute("href"));
+          e.preventDefault(); // デフォルトのページ内ジャンプをキャンセルする
+          const target = document.querySelector(this.getAttribute("href")); // 飛び先の要素を取得する
           if (target) {
+            // 要素が存在する場合だけスムーススクロールを実行する
             target.scrollIntoView({
-              behavior: "smooth",
-              block: "start",
+              behavior: "smooth", // アニメーション付きでスクロールする
+              block: "start", // 要素の上端が画面上部に来るようにする
             });
           }
         });
       });
 
-      // Navbar background on scroll
+      // スクロール量に応じてナビバーの背景透明度を変える
       window.addEventListener("scroll", () => {
-        const nav = document.querySelector(".nav");
+        const nav = document.querySelector(".nav"); // ナビバー要素を取得する
         if (window.scrollY > 100) {
+          // スクロール量が100pxを超えたら背景を不透明にする
           nav.style.background = "rgba(15, 23, 42, 0.95)";
         } else {
+          // 100px以下ならやや透明な背景にする
           nav.style.background = "rgba(15, 23, 42, 0.8)";
         }
       });
 
-      // Intersection Observer for animations
+      // スクロールに連動するフェードインアニメーション設定（Intersection Observer を使う）
       const observerOptions = {
-        threshold: 0.1,
-        rootMargin: "0px 0px -50px 0px",
+        threshold: 0.1, // 要素の10%が画面内に入ったら発火する
+        rootMargin: "0px 0px -50px 0px", // 画面下端より50px手前で発火させる
       };
 
+      // 要素が画面に入ったときに不透明化して上方向の移動を完了させる
       const observer = new IntersectionObserver((entries) => {
         entries.forEach((entry) => {
           if (entry.isIntersecting) {
-            entry.target.style.opacity = "1";
-            entry.target.style.transform = "translateY(0)";
+            // 要素が画面内に入ったら表示状態に変える
+            entry.target.style.opacity = "1"; // 完全に表示する
+            entry.target.style.transform = "translateY(0)"; // 元の位置に戻す
           }
         });
       }, observerOptions);
 
+      // アニメーション対象の各要素を初期状態（非表示・下方向にずれた状態）にして監視登録する
       document
         .querySelectorAll(
           ".skill-card, .work-card, .cert-card, .timeline-item, .contact-card, .stat-item, .work-proof"
         )
         .forEach((el) => {
-          el.style.opacity = "0";
-          el.style.transform = "translateY(30px)";
-          el.style.transition = "all 0.6s ease";
-          observer.observe(el);
+          el.style.opacity = "0"; // 初期状態は透明にする
+          el.style.transform = "translateY(30px)"; // 初期状態は30px下にずらす
+          el.style.transition = "all 0.6s ease"; // 0.6秒かけてアニメーションする
+          observer.observe(el); // Intersection Observer に要素を登録する
         });
 
       // ---- Live self-proof: 焼き込み JSON でプロジェクトカードに本物の CI/コミット/言語を描画 ----

@@ -41,7 +41,9 @@ jobs:
           persist-credentials: true
 
       - name: Build data/portfolio.json
-        uses: actions/github-script@v7
+        # サードパーティアクションは可変タグでなく commit SHA に固定する（サプライチェーン整合性 / issue #16）。
+        # SHA は actions/github-script の v7 タグ（= v7.1.0）が指す実コミット。バージョンは行末コメントで併記する。
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
         with:
           script: |
             const fs = require("fs");

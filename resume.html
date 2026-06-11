@@ -24,6 +24,8 @@
   <style>
     :root {
       --primary: #2563eb;
+      /* プライマリカラーの濃いバリアント（ホバー時などに使用） */
+      --primary-dark: #1d4ed8;
       --secondary: #64748b;
       --text: #1e293b;
       --text-light: #64748b;
@@ -266,7 +268,7 @@
     }
     
     .link-item:hover {
-      background: #1d4ed8;
+      background: var(--primary-dark);
       transform: translateY(-2px);
     }
     

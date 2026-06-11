@@ -22,7 +22,7 @@
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'sha256-Rl66tKYGsuXdv0WY4sp73Dji7iE3dExIA0ibkRGWrOU='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'"
+      content="default-src 'self'; script-src 'self' 'sha256-aGoEkrWnx4f5IAI99ml66CVN3XrsL3ae30PTAUfUk0k='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'"
     />
     <meta name="referrer" content="strict-origin-when-cross-origin" />
 
@@ -93,6 +93,9 @@
         --color-heart: #ef4444;
         /* CI 失敗バッジのテキスト色 */
         --color-failure-text: #fca5a5;
+        /* ナビバーの背景色（--bg-dark の rgba バリアント）— 直書き禁止に準拠 */
+        --bg-nav: rgba(15, 23, 42, 0.8);
+        --bg-nav-scrolled: rgba(15, 23, 42, 0.95);
       }
 
       * {
@@ -174,10 +177,16 @@
         right: 0;
         z-index: 1000;
         padding: 1rem 2rem;
-        background: rgba(15, 23, 42, 0.8);
+        background: var(--bg-nav);
         backdrop-filter: blur(20px);
         border-bottom: 1px solid var(--border);
         transition: all 0.3s ease;
+      }
+
+      /* スクロール時に適用する不透明な背景クラス（ JS から classList で切り替える） */
+      /* .nav より後で宣言されているためカスケード順で優先される — !important は不要 */
+      .nav--scrolled {
+        background: var(--bg-nav-scrolled);
       }
 
       .nav-content {
@@ -418,12 +427,16 @@
         .bg-animation::before {
           animation: none;
         }
-        /* アバターの浮遊アニメーションを止める */
-        .avatar-container {
+        /* アバターの浮遊アニメーションを止める（実際のクラスは .hero-avatar） */
+        .hero-avatar {
           animation: none;
         }
-        /* ヒーローセクションのフェードインを止める */
-        .hero-content {
+        /* ヒーローセクションの各子要素のフェードインを止めて可視化する（子要素個別に opacity: 0 が設定されているため） */
+        .hero-greeting,
+        .hero-name,
+        .hero-title,
+        .hero-description,
+        .hero-cta {
           animation: none;
           opacity: 1;
         }
@@ -730,7 +743,7 @@
         flex: 1;
       }
 
-      .cert-info h4 {
+      .cert-info h3 {
         font-size: 1.1rem;
         font-weight: 700;
         color: var(--text-primary);
@@ -936,7 +949,7 @@
         transform: scale(1.1);
       }
 
-      .contact-card h4 {
+      .contact-card h3 {
         font-size: 1.2rem;
         font-weight: 700;
         color: var(--text-primary);
@@ -1277,7 +1290,7 @@
           </a>
         </div>
       </div>
-      <div class="scroll-indicator">
+      <div class="scroll-indicator" aria-hidden="true">
         <span></span>
       </div>
     </section>
@@ -1555,7 +1568,7 @@
           <div class="cert-card">
             <div class="cert-icon">🏆</div>
             <div class="cert-info">
-              <h4>PL-500: Microsoft Power Automate RPA Developer</h4>
+              <h3>PL-500: Microsoft Power Automate RPA Developer</h3>
               <div class="cert-org">Microsoft</div>
               <div class="cert-date">2025年12月23日取得</div>
             </div>
@@ -1571,7 +1584,7 @@
           <div class="cert-card">
             <div class="cert-icon">🎯</div>
             <div class="cert-info">
-              <h4>PL-900: Microsoft Power Platform Fundamentals</h4>
+              <h3>PL-900: Microsoft Power Platform Fundamentals</h3>
               <div class="cert-org">Microsoft</div>
               <div class="cert-date">2025年9月28日取得</div>
             </div>
@@ -1587,7 +1600,7 @@
           <div class="cert-card">
             <div class="cert-icon">📋</div>
             <div class="cert-info">
-              <h4>ITIL Foundation</h4>
+              <h3>ITIL Foundation</h3>
               <div class="cert-org">PeopleCert</div>
               <div class="cert-date">2024年10月4日取得</div>
             </div>
@@ -1603,7 +1616,7 @@
           <div class="cert-card">
             <div class="cert-icon">💡</div>
             <div class="cert-info">
-              <h4>ITパスポート</h4>
+              <h3>ITパスポート</h3>
               <div class="cert-org">IPA (情報処理推進機構)</div>
               <div class="cert-date">2024年1月9日取得</div>
             </div>
@@ -1703,7 +1716,7 @@
         <div class="contact-grid">
           <a href="mailto:izumacha.1010@gmail.com" class="contact-card">
             <div class="contact-icon">📧</div>
-            <h4>Email</h4>
+            <h3>Email</h3>
             <p>izumacha.1010@gmail.com</p>
           </a>
 
@@ -1714,7 +1727,7 @@
             rel="noopener noreferrer"
           >
             <div class="contact-icon">🐙</div>
-            <h4>GitHub</h4>
+            <h3>GitHub</h3>
             <p>@izumacha</p>
           </a>
 
@@ -1725,7 +1738,7 @@
             rel="noopener noreferrer"
           >
             <div class="contact-icon">💼</div>
-            <h4>Portfolio</h4>
+            <h3>Portfolio</h3>
             <p>View Source Code</p>
           </a>
         </div>
@@ -1764,22 +1777,29 @@
         });
       });
 
-      // スクロール量に応じてナビバーの背景透明度を変える
+      // スクロール量に応じてナビバーの不透明クラスを付け外しする（インラインスタイルではなく CSS クラスで制御）
+      const SCROLL_THRESHOLD = 100; // 不透明に切り替えるスクロール量の閾値（px）
+      // ナビバー要素をスクロールハンドラの外でキャッシュする（スクロールのたびに DOM クエリが走るのを防ぐ）
+      const nav = document.querySelector(".nav");
       window.addEventListener("scroll", () => {
-        const nav = document.querySelector(".nav"); // ナビバー要素を取得する
-        if (window.scrollY > 100) {
-          // スクロール量が100pxを超えたら背景を不透明にする
-          nav.style.background = "rgba(15, 23, 42, 0.95)";
+        if (window.scrollY > SCROLL_THRESHOLD) {
+          // 閾値を超えたら不透明クラスを付与する
+          nav.classList.add("nav--scrolled");
         } else {
-          // 100px以下ならやや透明な背景にする
-          nav.style.background = "rgba(15, 23, 42, 0.8)";
+          // 閾値以下なら不透明クラスを外してデフォルト（半透明）に戻す
+          nav.classList.remove("nav--scrolled");
         }
       });
 
+      const OBSERVER_ROOT_MARGIN = "0px 0px -50px 0px"; // 画面下端より手前で発火させるマージン
+      const OBSERVER_THRESHOLD = 0.1; // 要素の10%が画面内に入ったら発火する割合
+      const ANIM_INITIAL_TRANSLATE = "30px"; // アニメーション開始時の下方向オフセット
+      const ANIM_TRANSITION = "all 0.6s ease"; // フェードインアニメーションの遷移設定（全プロパティに適用）
+
       // スクロールに連動するフェードインアニメーション設定（Intersection Observer を使う）
       const observerOptions = {
-        threshold: 0.1, // 要素の10%が画面内に入ったら発火する
-        rootMargin: "0px 0px -50px 0px", // 画面下端より50px手前で発火させる
+        threshold: OBSERVER_THRESHOLD, // 要素の10%が画面内に入ったら発火する
+        rootMargin: OBSERVER_ROOT_MARGIN, // 画面下端より50px手前で発火させる
       };
 
       // 要素が画面に入ったときに不透明化して上方向の移動を完了させる
@@ -1804,22 +1824,24 @@
           if (!prefersReducedMotion) {
             // 動きを抑制しない設定のときだけインラインスタイルでアニメーション初期状態を設定する
             el.style.opacity = "0"; // 初期状態は透明にする
-            el.style.transform = "translateY(30px)"; // 初期状態は30px下にずらす
-            el.style.transition = "all 0.6s ease"; // 0.6秒かけてアニメーションする
+            el.style.transform = "translateY(" + ANIM_INITIAL_TRANSLATE + ")"; // 初期状態は定数分だけ下にずらす
+            el.style.transition = ANIM_TRANSITION; // 定数で設定したアニメーション遷移を適用する
+            // モーション低減設定が有効な場合はアニメーション自体を使わないため、監視も不要
+            observer.observe(el); // Intersection Observer に要素を登録する
           }
-          observer.observe(el); // Intersection Observer に要素を登録する（モーション有無に関わらず登録）
         });
 
       // ---- Live self-proof: 焼き込み JSON でプロジェクトカードに本物の CI/コミット/言語を描画 ----
       (function () {
-        // CI 結論コードを「色クラス・日本語ラベル」に対応づける表
+        // CI 結論コードを「色クラス・日本語ラベル」に対応づける表（portfolio.json の status 値と一致させる）
         const CI_LABELS = {
-          success: { cls: "is-success", label: "CI 成功" },
-          failure: { cls: "is-failure", label: "CI 失敗" },
-          cancelled: { cls: "is-failure", label: "CI 中止" },
-          timed_out: { cls: "is-failure", label: "CI タイムアウト" },
-          in_progress: { cls: "is-running", label: "CI 実行中" },
-          none: { cls: "", label: "CI 情報なし" },
+          success: { cls: "is-success", label: "CI 成功" }, // ワークフローが正常終了した場合
+          failure: { cls: "is-failure", label: "CI 失敗" }, // ワークフローが失敗した場合
+          cancelled: { cls: "is-failure", label: "CI 中止" }, // ワークフローがキャンセルされた場合
+          timed_out: { cls: "is-failure", label: "CI タイムアウト" }, // 制限時間を超えた場合
+          in_progress: { cls: "is-running", label: "CI 実行中" }, // まだ実行中の場合
+          skipped: { cls: "", label: "CI スキップ" }, // ジョブがスキップされた場合
+          none: { cls: "", label: "CI 情報なし" }, // CI 情報がない・未走行の場合
         };
 
         // ISO 日時を「YYYY/MM/DD」形式に整形する（空文字や不正値は null を返す）
@@ -1828,10 +1850,10 @@
           const d = new Date(iso); // 文字列を Date に変換
           if (isNaN(d.getTime())) return null; // パース失敗ならスキップ
           // ゼロ埋めした年月日を組み立てる（%-d 等の非移植指定子は使わない）
-          const y = d.getFullYear();
-          const m = String(d.getMonth() + 1).padStart(2, "0");
-          const day = String(d.getDate()).padStart(2, "0");
-          return `${y}/${m}/${day}`;
+          const y = d.getFullYear(); // 年を4桁で取得する
+          const m = String(d.getMonth() + 1).padStart(2, "0"); // 月を2桁にゼロ埋めする（getMonth は 0 始まりなので +1）
+          const day = String(d.getDate()).padStart(2, "0"); // 日を2桁にゼロ埋めする
+          return `${y}/${m}/${day}`; // 「YYYY/MM/DD」形式で返す
         }
 
         // テキスト用の安全なバッジ要素（span）を作る
@@ -1839,10 +1861,10 @@
           const el = document.createElement("span"); // span 要素を生成
           el.className = "proof-badge" + (extraCls ? " " + extraCls : ""); // クラスを付与
           const dot = document.createElement("span"); // 状態ドット
-          dot.className = "proof-dot";
+          dot.className = "proof-dot"; // ドットに専用クラスを付与する
           el.appendChild(dot); // ドットを先頭に追加
           el.appendChild(document.createTextNode(text)); // ラベルテキストを追加
-          return el;
+          return el; // 完成したバッジ要素を返す
         }
 
         // URL が http(s) スキームのみかを検証する（javascript:/data: 等の注入を防ぐ防御層）
@@ -1867,10 +1889,10 @@
           el.target = "_blank"; // 別タブで開く
           el.rel = "noopener noreferrer"; // 規約どおりのセキュリティ属性
           const dot = document.createElement("span"); // 状態ドット
-          dot.className = "proof-dot";
+          dot.className = "proof-dot"; // ドットに専用クラスを付与する
           el.appendChild(dot); // ドットを先頭に追加
           el.appendChild(document.createTextNode(text)); // ラベルテキストを追加
-          return el;
+          return el; // 完成したリンクバッジ要素を返す
         }
 
         // 1 枚のカードに対応する repo データでバッジ群を描画する
@@ -1931,7 +1953,7 @@
               // key → repo の対応表を作る
               const byKey = {};
               repos.forEach(function (r) {
-                byKey[r.key] = r;
+                byKey[r.key] = r; // キーと repo データを対応表に登録する
               });
               // data-repo-key を持つ各カードへ描画する
               document.querySelectorAll(".work-card[data-repo-key]").forEach(function (card) {
@@ -1946,9 +1968,9 @@
 
         // DOM 構築済みなら即実行、そうでなければ読み込み完了を待つ
         if (document.readyState === "loading") {
-          document.addEventListener("DOMContentLoaded", init);
+          document.addEventListener("DOMContentLoaded", init); // DOM 読み込み完了後に init を呼び出す
         } else {
-          init();
+          init(); // DOM が既に読み込み済みなので即座に init を実行する
         }
       })();
     </script>

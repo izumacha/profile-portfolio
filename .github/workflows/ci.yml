@@ -57,6 +57,9 @@ jobs:
         with:
           ref: ${{ github.head_ref || github.ref_name }}
           token: ${{ secrets.GITHUB_TOKEN }}
+          # 浅いクローン（shallow clone）だと git push が "shallow update not allowed" で失敗するため
+          # 完全な履歴を取得して push を確実に成功させる
+          fetch-depth: 0
 
       - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
         with:
@@ -77,7 +80,12 @@ jobs:
       - name: スナップショットが存在しなかった場合のみベースラインを自動コミット
         # ベースラインが無くて新規生成された PNG（未追跡ファイル）があれば自動コミットする。
         # 既存スナップショットとの差分（ビジュアルリグレッション）の場合は自動コミットしない。
-        if: steps.playwright.outcome == 'failure'
+        # フォーク PR からの push は GITHUB_TOKEN 権限が制限され、かつスナップショットは
+        # ベースブランチ側に自動コミットすべきでないためフォーク PR を除外する
+        if: >
+          steps.playwright.outcome == 'failure' &&
+          (github.event_name != 'pull_request' ||
+           github.event.pull_request.head.repo.full_name == github.repository)
         id: autocommit
         run: |
           # 未追跡の PNG = スナップショットが存在しなかったため新規生成されたファイル

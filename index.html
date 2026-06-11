@@ -431,11 +431,17 @@
         .scroll-indicator {
           animation: none;
         }
+        /* CSS の scroll-behavior: smooth をキャンセルしてページ内リンクの瞬間移動を有効にする */
+        html {
+          scroll-behavior: auto;
+        }
         /* ホバー時のカード移動を抑制する */
         .skill-card,
         .work-card,
         .cert-card,
-        .contact-card {
+        .contact-card,
+        /* タイムラインアイテムのホバー遷移も抑制する */
+        .timeline-item {
           transition: none;
         }
       }
@@ -1734,6 +1740,12 @@
     </footer>
 
     <script>
+      // アニメーションを抑制したいか（ユーザーの OS 設定）をスクリプトの最初に取得する
+      // CSS の @media (prefers-reduced-motion) はインラインスタイルより優先度が低いため、
+      // JS 側でも同じ条件を確認しないとアニメーションを完全に止められない
+      // ここで宣言することで、以降のすべてのアニメーション制御でこの変数を参照できる
+      const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
       // ナビゲーションリンクのスムーススクロール処理
       // href が「#」で始まるすべてのリンクを取得して順番に処理する
       document.querySelectorAll('a[href^="#"]').forEach((anchor) => {
@@ -1742,9 +1754,10 @@
           e.preventDefault(); // デフォルトのページ内ジャンプをキャンセルする
           const target = document.querySelector(this.getAttribute("href")); // 飛び先の要素を取得する
           if (target) {
-            // 要素が存在する場合だけスムーススクロールを実行する
+            // 要素が存在する場合だけスクロールを実行する
+            // モーション低減設定が有効なら瞬間移動（"auto"）、無効ならアニメーション付き（"smooth"）
             target.scrollIntoView({
-              behavior: "smooth", // アニメーション付きでスクロールする
+              behavior: prefersReducedMotion ? "auto" : "smooth",
               block: "start", // 要素の上端が画面上部に来るようにする
             });
           }
@@ -1780,10 +1793,7 @@
         });
       }, observerOptions);
 
-      // アニメーションを抑制したいか（ユーザーの OS 設定）を取得する
-      // CSS の @media (prefers-reduced-motion) はインラインスタイルより優先度が低いため、
-      // JS 側でも同じ条件を確認しないとアニメーションを完全に止められない
-      const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      // prefersReducedMotion はスクリプト先頭で宣言済み（再宣言しない）
 
       // アニメーション対象の各要素を初期状態（非表示・下方向にずれた状態）にして監視登録する
       document

@@ -1780,16 +1780,24 @@
         });
       }, observerOptions);
 
+      // アニメーションを抑制したいか（ユーザーの OS 設定）を取得する
+      // CSS の @media (prefers-reduced-motion) はインラインスタイルより優先度が低いため、
+      // JS 側でも同じ条件を確認しないとアニメーションを完全に止められない
+      const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
       // アニメーション対象の各要素を初期状態（非表示・下方向にずれた状態）にして監視登録する
       document
         .querySelectorAll(
           ".skill-card, .work-card, .cert-card, .timeline-item, .contact-card, .stat-item, .work-proof"
         )
         .forEach((el) => {
-          el.style.opacity = "0"; // 初期状態は透明にする
-          el.style.transform = "translateY(30px)"; // 初期状態は30px下にずらす
-          el.style.transition = "all 0.6s ease"; // 0.6秒かけてアニメーションする
-          observer.observe(el); // Intersection Observer に要素を登録する
+          if (!prefersReducedMotion) {
+            // 動きを抑制しない設定のときだけインラインスタイルでアニメーション初期状態を設定する
+            el.style.opacity = "0"; // 初期状態は透明にする
+            el.style.transform = "translateY(30px)"; // 初期状態は30px下にずらす
+            el.style.transition = "all 0.6s ease"; // 0.6秒かけてアニメーションする
+          }
+          observer.observe(el); // Intersection Observer に要素を登録する（モーション有無に関わらず登録）
         });
 
       // ---- Live self-proof: 焼き込み JSON でプロジェクトカードに本物の CI/コミット/言語を描画 ----

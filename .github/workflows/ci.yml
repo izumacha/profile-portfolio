@@ -5,12 +5,15 @@ on:
   push:
     branches: [main]
 
-permissions:
-  contents: read
+# ワークフローレベルの permissions は設定せず、各ジョブで最小権限を個別に指定する。
+# visual-regression ジョブはスナップショット自動コミットのため contents: write が必要。
 
 jobs:
   html-validate:
     runs-on: ubuntu-latest
+    # HTML バリデーションはリポジトリの読み取りのみ必要
+    permissions:
+      contents: read
     steps:
       # Third-party actions are pinned to a commit SHA (not a mutable tag) for
       # supply-chain integrity (issue #16); the version is noted in the comment.
@@ -25,6 +28,9 @@ jobs:
 
   link-check:
     runs-on: ubuntu-latest
+    # リンクチェックはリポジトリの読み取りのみ必要
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
@@ -41,8 +47,16 @@ jobs:
 
   visual-regression:
     runs-on: ubuntu-latest
+    # スナップショットが存在しない場合にベースラインを自動コミットするため write が必要
+    permissions:
+      contents: write
     steps:
+      # head_ref（PR ブランチ名）を明示して checkout することで、
+      # デタッチ HEAD でなくブランチとして取得し git push を可能にする
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
         with:
@@ -55,7 +69,36 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Run visual regression tests
+        # ベースラインが存在しない場合に失敗しても後続ステップでリカバリするため continue-on-error を使う
+        id: playwright
         run: npm run test:e2e
+        continue-on-error: true
+
+      - name: スナップショットが存在しなかった場合のみベースラインを自動コミット
+        # ベースラインが無くて新規生成された PNG（未追跡ファイル）があれば自動コミットする。
+        # 既存スナップショットとの差分（ビジュアルリグレッション）の場合は自動コミットしない。
+        if: steps.playwright.outcome == 'failure'
+        id: autocommit
+        run: |
+          # 未追跡の PNG = スナップショットが存在しなかったため新規生成されたファイル
+          NEW=$(git ls-files --others --exclude-standard -- 'e2e/visual.spec.ts-snapshots/')
+          if [ -n "$NEW" ]; then
+            # bot として git の作者情報を設定する
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            # 新規スナップショットだけをステージして コミット・プッシュする
+            git add e2e/visual.spec.ts-snapshots/
+            git commit -m "chore(e2e): Playwright ベースラインスナップショットを自動生成"
+            git push
+            # 次のステップで「自動コミット済み」と判定するために出力する
+            echo "committed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: ビジュアルリグレッション失敗を伝播（自動生成以外の失敗のみ）
+        # スナップショットが自動コミットされた場合は次の CI 実行で検証するため現行ジョブは通す。
+        # 既存スナップショットとの差分（実際のリグレッション）の場合は失敗を伝播する。
+        if: steps.playwright.outcome == 'failure' && steps.autocommit.outputs.committed != 'true'
+        run: exit 1
 
       # On failure, upload the (re)generated snapshots and the Playwright diff
       # report so baselines can be refreshed when the layout changes.

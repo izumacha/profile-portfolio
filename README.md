@@ -25,7 +25,7 @@
 
 | プロジェクト | 概要 | 主な技術 |
 |---|---|---|
-| [my-first-ai-app](https://github.com/izumacha/my-first-ai-app) | 日常生活の疑問に AI がチャットで回答する「AI 暮らしアシスタント」。ストリーミング応答とカテゴリ最適化プロンプトに対応。 | Next.js 15 / TypeScript / Claude API (Sonnet 4.6) / Vercel AI SDK / Tailwind CSS v4 |
+| [batch-scheduler](https://github.com/izumacha/batch-scheduler) | YAML で定義したジョブを依存関係（DAG）に従って実行する小さく堅牢なバッチ実行管理ツール。リトライ・タイムアウト・失敗時の依存スキップ・実行履歴の記録に対応。 | Java 21 / Maven 3.9+ / YAML |
 | [my-task-manager](https://github.com/izumacha/my-task-manager) | 1 日のタスクを時間割のように時間軸へ配置するタイムライン型デスクトッププランナー。完了時点を起点に繰り返す「完了起点リピート」が特徴。 | Python 3.10+ / tkinter / Desktop App |
 
 ## 技術スタック

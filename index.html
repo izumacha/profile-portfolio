@@ -22,7 +22,7 @@
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'sha256-Rl66tKYGsuXdv0WY4sp73Dji7iE3dExIA0ibkRGWrOU='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'"
+      content="default-src 'self'; script-src 'self' 'sha256-aGoEkrWnx4f5IAI99ml66CVN3XrsL3ae30PTAUfUk0k='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'"
     />
     <meta name="referrer" content="strict-origin-when-cross-origin" />
 
@@ -93,6 +93,9 @@
         --color-heart: #ef4444;
         /* CI 失敗バッジのテキスト色 */
         --color-failure-text: #fca5a5;
+        /* ナビバーの背景色（--bg-dark の rgba バリアント）— 直書き禁止に準拠 */
+        --bg-nav: rgba(15, 23, 42, 0.8);
+        --bg-nav-scrolled: rgba(15, 23, 42, 0.95);
       }
 
       * {
@@ -174,15 +177,16 @@
         right: 0;
         z-index: 1000;
         padding: 1rem 2rem;
-        background: rgba(15, 23, 42, 0.8);
+        background: var(--bg-nav);
         backdrop-filter: blur(20px);
         border-bottom: 1px solid var(--border);
         transition: all 0.3s ease;
       }
 
       /* スクロール時に適用する不透明な背景クラス（ JS から classList で切り替える） */
+      /* .nav より後で宣言されているためカスケード順で優先される — !important は不要 */
       .nav--scrolled {
-        background: rgba(15, 23, 42, 0.95) !important;
+        background: var(--bg-nav-scrolled);
       }
 
       .nav-content {
@@ -1775,8 +1779,9 @@
 
       // スクロール量に応じてナビバーの不透明クラスを付け外しする（インラインスタイルではなく CSS クラスで制御）
       const SCROLL_THRESHOLD = 100; // 不透明に切り替えるスクロール量の閾値（px）
+      // ナビバー要素をスクロールハンドラの外でキャッシュする（スクロールのたびに DOM クエリが走るのを防ぐ）
+      const nav = document.querySelector(".nav");
       window.addEventListener("scroll", () => {
-        const nav = document.querySelector(".nav"); // ナビバー要素を取得する
         if (window.scrollY > SCROLL_THRESHOLD) {
           // 閾値を超えたら不透明クラスを付与する
           nav.classList.add("nav--scrolled");
@@ -1821,8 +1826,9 @@
             el.style.opacity = "0"; // 初期状態は透明にする
             el.style.transform = "translateY(" + ANIM_INITIAL_TRANSLATE + ")"; // 初期状態は定数分だけ下にずらす
             el.style.transition = ANIM_TRANSITION; // 定数で設定したアニメーション遷移を適用する
+            // モーション低減設定が有効な場合はアニメーション自体を使わないため、監視も不要
+            observer.observe(el); // Intersection Observer に要素を登録する
           }
-          observer.observe(el); // Intersection Observer に要素を登録する（モーション有無に関わらず登録）
         });
 
       // ---- Live self-proof: 焼き込み JSON でプロジェクトカードに本物の CI/コミット/言語を描画 ----

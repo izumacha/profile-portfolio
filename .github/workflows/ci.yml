@@ -82,8 +82,11 @@ jobs:
         # 既存スナップショットとの差分（ビジュアルリグレッション）の場合は自動コミットしない。
         # フォーク PR からの push は GITHUB_TOKEN 権限が制限され、かつスナップショットは
         # ベースブランチ側に自動コミットすべきでないためフォーク PR を除外する
+        # main への直 push ではスナップショットを自動コミットしない
+        # (auto-commit がレビューをバイパスして main に混入するのを防ぐ)
         if: >
           steps.playwright.outcome == 'failure' &&
+          github.ref != 'refs/heads/main' &&
           (github.event_name != 'pull_request' ||
            github.event.pull_request.head.repo.full_name == github.repository)
         id: autocommit
@@ -94,10 +97,13 @@ jobs:
             # bot として git の作者情報を設定する
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
-            # 新規スナップショットだけをステージして コミット・プッシュする
-            git add e2e/visual.spec.ts-snapshots/
+            # 新規スナップショット（未追跡ファイル）だけをステージする
+            # git add e2e/... で全体を add すると既存の差分（リグレッション）も混入するため
+            # $NEW に列挙された個別ファイルだけを add する
+            echo "$NEW" | xargs git add --
             git commit -m "chore(e2e): Playwright ベースラインスナップショットを自動生成"
-            git push
+            # push 失敗はサイレントに通過させない（|| exit 1 で CI を即時失敗させる）
+            git push || exit 1
             # 次のステップで「自動コミット済み」と判定するために出力する
             echo "committed=true" >> "$GITHUB_OUTPUT"
           fi

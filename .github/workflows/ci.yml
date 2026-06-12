@@ -91,6 +91,8 @@ jobs:
            github.event.pull_request.head.repo.full_name == github.repository)
         id: autocommit
         run: |
+          # 未定義変数・コマンド失敗・パイプ失敗を即時エラーとして検出する（セキュリティ上の best practice）
+          set -euo pipefail
           # 未追跡の PNG = スナップショットが存在しなかったため新規生成されたファイル
           NEW=$(git ls-files --others --exclude-standard -- 'e2e/visual.spec.ts-snapshots/')
           if [ -n "$NEW" ]; then
@@ -100,7 +102,8 @@ jobs:
             # 新規スナップショット（未追跡ファイル）だけをステージする
             # git add e2e/... で全体を add すると既存の差分（リグレッション）も混入するため
             # $NEW に列挙された個別ファイルだけを add する
-            echo "$NEW" | xargs git add --
+            # ファイル名にスペースや特殊文字が含まれる場合も安全に処理するため NULL 区切りを使用する
+            printf '%s\0' $NEW | xargs -0 git add --
             git commit -m "chore(e2e): Playwright ベースラインスナップショットを自動生成"
             # push 失敗はサイレントに通過させない（|| exit 1 で CI を即時失敗させる）
             git push || exit 1

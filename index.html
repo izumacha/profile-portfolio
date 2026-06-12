@@ -71,6 +71,8 @@
         --primary: #6366f1;
         --primary-light: #a5b4fc;
         --primary-dark: #4f46e5;
+        /* --primary の 30% 透明度バリアント（--shadow-glow のグロー演出で使用） */
+        --primary-30: rgba(99, 102, 241, 0.3);
         --accent: #22d3ee;
         --accent-green: #10b981;
         --bg-dark: #0f172a;
@@ -80,10 +82,13 @@
         --text-secondary: #e2e8f0;
         --text-muted: #cbd5e1;
         --border: rgba(148, 163, 184, 0.2);
+        /* --text-muted の 15% 透明度バリアント（.work-badge.sub の背景色で使用） */
+        --muted-15: rgba(148, 163, 184, 0.15);
         --gradient-1: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #d946ef 100%);
         --gradient-2: linear-gradient(135deg, #06b6d4 0%, #22d3ee 100%);
         --gradient-3: linear-gradient(135deg, #10b981 0%, #34d399 100%);
-        --shadow-glow: 0 0 40px rgba(99, 102, 241, 0.3);
+        /* --primary のグロー影（--primary-30 を参照して一元管理） */
+        --shadow-glow: 0 0 40px var(--primary-30);
         /* コードブロック構文ハイライト用の色トークン（直書き禁止の方針に準拠） */
         --code-keyword: #c792ea;
         --code-string: #c3e88d;
@@ -185,6 +190,7 @@
 
       /* スクロール時に適用する不透明な背景クラス（ JS から classList で切り替える） */
       /* .nav より後で宣言されているためカスケード順で優先される — !important は不要 */
+      /* ⚠ 警告: このルールを .nav より前に移動するとスクロール時の背景が効かなくなる */
       .nav--scrolled {
         background: var(--bg-nav-scrolled);
       }
@@ -743,7 +749,8 @@
         flex: 1;
       }
 
-      .cert-info h3 {
+      /* 証明書カードのタイトルは h4（セクション h2→Works グループ h3→Works 個別 h4 の階層に揃える） */
+      .cert-info h4 {
         font-size: 1.1rem;
         font-weight: 700;
         color: var(--text-primary);
@@ -1127,11 +1134,13 @@
         font-weight: 700;
         letter-spacing: 0.05em;
         background: var(--gradient-1);
-        color: #fff;
+        /* var(--gradient-1) 背景に対して十分なコントラストを確保するため白テキストが必須（--text-primary の値を変更する際は gradient-1 とのコントラスト比を確認すること） */
+        color: var(--text-primary);
       }
 
       .work-badge.sub {
-        background: rgba(148, 163, 184, 0.15);
+        /* --muted-15 を参照して一元管理（直書き禁止ルールに準拠） */
+        background: var(--muted-15);
         color: var(--text-muted);
         border: 1px solid var(--border);
       }
@@ -1148,6 +1157,7 @@
         color: var(--accent);
       }
 
+      /* h4 はワークカード内の個別プロジェクトタイトル用（Works グループが h3 のため個別項目は h4）。マークアップを h3 に変更する場合はこのセレクタも必ず合わせて変更すること */
       .work-card h4 {
         font-size: 1.3rem;
         font-weight: 700;
@@ -1169,7 +1179,8 @@
         --badge-bg: rgba(148, 163, 184, 0.12);
         --badge-border: var(--border);
         --status-success: var(--accent-green);
-        --status-failure: #ef4444;
+        /* CI 失敗バッジ色：--color-heart と同値のため変数参照で一元管理 */
+        --status-failure: var(--color-heart);
         --status-neutral: var(--text-muted);
         --status-running: var(--accent);
       }
@@ -1568,7 +1579,7 @@
           <div class="cert-card">
             <div class="cert-icon">🏆</div>
             <div class="cert-info">
-              <h3>PL-500: Microsoft Power Automate RPA Developer</h3>
+              <h4>PL-500: Microsoft Power Automate RPA Developer</h4>
               <div class="cert-org">Microsoft</div>
               <div class="cert-date">2025年12月23日取得</div>
             </div>
@@ -1584,7 +1595,7 @@
           <div class="cert-card">
             <div class="cert-icon">🎯</div>
             <div class="cert-info">
-              <h3>PL-900: Microsoft Power Platform Fundamentals</h3>
+              <h4>PL-900: Microsoft Power Platform Fundamentals</h4>
               <div class="cert-org">Microsoft</div>
               <div class="cert-date">2025年9月28日取得</div>
             </div>
@@ -1600,7 +1611,7 @@
           <div class="cert-card">
             <div class="cert-icon">📋</div>
             <div class="cert-info">
-              <h3>ITIL Foundation</h3>
+              <h4>ITIL Foundation</h4>
               <div class="cert-org">PeopleCert</div>
               <div class="cert-date">2024年10月4日取得</div>
             </div>
@@ -1616,7 +1627,7 @@
           <div class="cert-card">
             <div class="cert-icon">💡</div>
             <div class="cert-info">
-              <h3>ITパスポート</h3>
+              <h4>ITパスポート</h4>
               <div class="cert-org">IPA (情報処理推進機構)</div>
               <div class="cert-date">2024年1月9日取得</div>
             </div>
@@ -1794,7 +1805,8 @@
       const OBSERVER_ROOT_MARGIN = "0px 0px -50px 0px"; // 画面下端より手前で発火させるマージン
       const OBSERVER_THRESHOLD = 0.1; // 要素の10%が画面内に入ったら発火する割合
       const ANIM_INITIAL_TRANSLATE = "30px"; // アニメーション開始時の下方向オフセット
-      const ANIM_TRANSITION = "all 0.6s ease"; // フェードインアニメーションの遷移設定（全プロパティに適用）
+      // 0.4s は CSS の他のカードトランジション（.skill-card, .cert-card 等）に揃えた値
+      const ANIM_TRANSITION = "all 0.4s ease"; // フェードインアニメーションの遷移設定（全プロパティに適用）
 
       // スクロールに連動するフェードインアニメーション設定（Intersection Observer を使う）
       const observerOptions = {
@@ -1809,6 +1821,8 @@
             // 要素が画面内に入ったら表示状態に変える
             entry.target.style.opacity = "1"; // 完全に表示する
             entry.target.style.transform = "translateY(0)"; // 元の位置に戻す
+            // 一度表示されたら監視を解除する（スクロールのたびに再計算が走るのを防ぐ）
+            observer.unobserve(entry.target);
           }
         });
       }, observerOptions);

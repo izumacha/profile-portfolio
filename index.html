@@ -71,6 +71,8 @@
         --primary: #6366f1;
         --primary-light: #a5b4fc;
         --primary-dark: #4f46e5;
+        /* --primary の 30% 透明度バリアント（--shadow-glow のグロー演出で使用） */
+        --primary-30: rgba(99, 102, 241, 0.3);
         --accent: #22d3ee;
         --accent-green: #10b981;
         --bg-dark: #0f172a;
@@ -80,10 +82,13 @@
         --text-secondary: #e2e8f0;
         --text-muted: #cbd5e1;
         --border: rgba(148, 163, 184, 0.2);
+        /* --text-muted の 15% 透明度バリアント（.work-badge.sub の背景色で使用） */
+        --muted-15: rgba(148, 163, 184, 0.15);
         --gradient-1: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #d946ef 100%);
         --gradient-2: linear-gradient(135deg, #06b6d4 0%, #22d3ee 100%);
         --gradient-3: linear-gradient(135deg, #10b981 0%, #34d399 100%);
-        --shadow-glow: 0 0 40px rgba(99, 102, 241, 0.3);
+        /* --primary のグロー影（--primary-30 を参照して一元管理） */
+        --shadow-glow: 0 0 40px var(--primary-30);
         /* コードブロック構文ハイライト用の色トークン（直書き禁止の方針に準拠） */
         --code-keyword: #c792ea;
         --code-string: #c3e88d;
@@ -96,31 +101,6 @@
         /* ナビバーの背景色（--bg-dark の rgba バリアント）— 直書き禁止に準拠 */
         --bg-nav: rgba(15, 23, 42, 0.8);
         --bg-nav-scrolled: rgba(15, 23, 42, 0.95);
-        /* --primary (#6366f1) の rgba バリアント — アルファ値別に一元管理 */
-        --primary-05: rgba(99, 102, 241, 0.05);
-        --primary-10: rgba(99, 102, 241, 0.1);
-        --primary-15: rgba(99, 102, 241, 0.15);
-        --primary-20: rgba(99, 102, 241, 0.2);
-        --primary-30: rgba(99, 102, 241, 0.3);
-        --primary-40: rgba(99, 102, 241, 0.4);
-        --primary-50: rgba(99, 102, 241, 0.5);
-        /* --accent (#22d3ee) の rgba バリアント */
-        --accent-08: rgba(34, 211, 238, 0.08);
-        --accent-10: rgba(34, 211, 238, 0.1);
-        /* グラデーション中間色 #8b5cf6 の rgba バリアント（gradient-1 で使用） */
-        --purple-10: rgba(139, 92, 246, 0.1);
-        --purple-20: rgba(139, 92, 246, 0.2);
-        /* グラデーション開始色 #06b6d4 の rgba バリアント（gradient-2 で使用） */
-        --cyan-dark-20: rgba(6, 182, 212, 0.2);
-        /* --accent-green (#10b981) の rgba バリアント */
-        --accent-green-20: rgba(16, 185, 129, 0.2);
-        --accent-green-35: rgba(16, 185, 129, 0.35);
-        /* グラデーション終端色 #34d399 の rgba バリアント（gradient-3 で使用） */
-        --green-light-20: rgba(52, 211, 153, 0.2);
-        /* テキストミュート系 (#94a3b8) の rgba バリアント */
-        --muted-15: rgba(148, 163, 184, 0.15);
-        /* 失敗状態色 (#ef4444) の rgba バリアント */
-        --failure-35: rgba(239, 68, 68, 0.35);
       }
 
       * {
@@ -165,17 +145,17 @@
         height: 200%;
         background: radial-gradient(
             circle at 20% 80%,
-            var(--primary-15) 0%,
+            rgba(99, 102, 241, 0.15) 0%,
             transparent 50%
           ),
           radial-gradient(
             circle at 80% 20%,
-            var(--purple-10) 0%,
+            rgba(139, 92, 246, 0.1) 0%,
             transparent 50%
           ),
           radial-gradient(
             circle at 40% 40%,
-            var(--accent-08) 0%,
+            rgba(34, 211, 238, 0.08) 0%,
             transparent 40%
           );
         animation: bgFloat 20s ease-in-out infinite;
@@ -387,12 +367,12 @@
       .btn-primary {
         background: var(--gradient-1);
         color: white;
-        box-shadow: 0 4px 20px var(--primary-40);
+        box-shadow: 0 4px 20px rgba(99, 102, 241, 0.4);
       }
 
       .btn-primary:hover {
         transform: translateY(-3px);
-        box-shadow: 0 8px 30px var(--primary-50);
+        box-shadow: 0 8px 30px rgba(99, 102, 241, 0.5);
       }
 
       .btn-secondary {
@@ -404,7 +384,7 @@
 
       .btn-secondary:hover {
         border-color: var(--primary);
-        background: var(--primary-10);
+        background: rgba(99, 102, 241, 0.1);
       }
 
       @keyframes fadeInUp {
@@ -653,7 +633,7 @@
 
       .skill-card:hover {
         transform: translateY(-8px);
-        border-color: var(--primary-30);
+        border-color: rgba(99, 102, 241, 0.3);
         box-shadow: var(--shadow-glow);
       }
 
@@ -673,13 +653,13 @@
       }
 
       .skill-icon.purple {
-        background: linear-gradient(135deg, var(--primary-20), var(--purple-20));
+        background: linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(139, 92, 246, 0.2));
       }
       .skill-icon.cyan {
-        background: linear-gradient(135deg, var(--cyan-dark-20), var(--accent-10));
+        background: linear-gradient(135deg, rgba(6, 182, 212, 0.2), rgba(34, 211, 238, 0.2));
       }
       .skill-icon.green {
-        background: linear-gradient(135deg, var(--accent-green-20), var(--green-light-20));
+        background: linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(52, 211, 153, 0.2));
       }
 
       .skill-card h3 {
@@ -700,14 +680,14 @@
         border-radius: 50px;
         font-size: 0.85rem;
         font-weight: 500;
-        background: var(--primary-10);
+        background: rgba(99, 102, 241, 0.1);
         color: var(--primary-light);
-        border: 1px solid var(--primary-20);
+        border: 1px solid rgba(99, 102, 241, 0.2);
         transition: all 0.3s ease;
       }
 
       .skill-tag:hover {
-        background: var(--primary-20);
+        background: rgba(99, 102, 241, 0.2);
         transform: scale(1.05);
       }
 
@@ -744,7 +724,7 @@
 
       .cert-card:hover {
         transform: translateX(10px);
-        border-color: var(--primary-30);
+        border-color: rgba(99, 102, 241, 0.3);
         box-shadow: var(--shadow-glow);
       }
 
@@ -756,7 +736,7 @@
         width: 70px;
         height: 70px;
         border-radius: 16px;
-        background: linear-gradient(135deg, var(--primary-10), var(--purple-10));
+        background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(139, 92, 246, 0.1));
         display: flex;
         align-items: center;
         justify-content: center;
@@ -860,7 +840,7 @@
         font-size: 0.85rem;
         font-weight: 600;
         color: var(--accent);
-        background: var(--accent-10);
+        background: rgba(34, 211, 238, 0.1);
         padding: 0.3rem 1rem;
         border-radius: 50px;
         margin-bottom: 0.8rem;
@@ -875,7 +855,7 @@
       }
 
       .timeline-item:hover .timeline-content {
-        border-color: var(--primary-30);
+        border-color: rgba(99, 102, 241, 0.3);
         box-shadow: var(--shadow-glow);
       }
 
@@ -903,7 +883,7 @@
         background: linear-gradient(
           180deg,
           transparent 0%,
-          var(--primary-05) 100%
+          rgba(99, 102, 241, 0.05) 100%
         );
       }
 
@@ -965,7 +945,7 @@
         justify-content: center;
         font-size: 2rem;
         margin-bottom: 1.5rem;
-        background: linear-gradient(135deg, var(--primary-20), var(--purple-20));
+        background: linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(139, 92, 246, 0.2));
         transition: all 0.3s ease;
       }
 
@@ -1129,7 +1109,7 @@
 
       .work-card:hover {
         transform: translateY(-8px);
-        border-color: var(--primary-30);
+        border-color: rgba(99, 102, 241, 0.3);
         box-shadow: var(--shadow-glow);
       }
 
@@ -1152,10 +1132,12 @@
         font-weight: 700;
         letter-spacing: 0.05em;
         background: var(--gradient-1);
-        color: var(--text-primary); /* グラデーション背景に白テキストを乗せる（--text-primary = #ffffff）*/
+        /* var(--gradient-1) 背景に対して十分なコントラストを確保するため白テキストが必須（--text-primary の値を変更する際は gradient-1 とのコントラスト比を確認すること） */
+        color: var(--text-primary);
       }
 
       .work-badge.sub {
+        /* --muted-15 を参照して一元管理（直書き禁止ルールに準拠） */
         background: var(--muted-15);
         color: var(--text-muted);
         border: 1px solid var(--border);
@@ -1194,7 +1176,8 @@
         --badge-bg: rgba(148, 163, 184, 0.12);
         --badge-border: var(--border);
         --status-success: var(--accent-green);
-        --status-failure: #ef4444;
+        /* CI 失敗バッジ色：--color-heart と同値のため変数参照で一元管理 */
+        --status-failure: var(--color-heart);
         --status-neutral: var(--text-muted);
         --status-running: var(--accent);
       }
@@ -1229,7 +1212,7 @@
 
       a.proof-badge:hover {
         transform: translateY(-2px);
-        border-color: var(--primary-40);
+        border-color: rgba(99, 102, 241, 0.4);
       }
 
       .proof-badge .proof-dot {
@@ -1252,11 +1235,11 @@
 
       .proof-badge.is-success {
         color: var(--accent-green);
-        border-color: var(--accent-green-35);
+        border-color: rgba(16, 185, 129, 0.35);
       }
       .proof-badge.is-failure {
         color: var(--color-failure-text);
-        border-color: var(--failure-35);
+        border-color: rgba(239, 68, 68, 0.35);
       }
 
       .work-proof-meta {

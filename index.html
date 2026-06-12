@@ -96,6 +96,31 @@
         /* ナビバーの背景色（--bg-dark の rgba バリアント）— 直書き禁止に準拠 */
         --bg-nav: rgba(15, 23, 42, 0.8);
         --bg-nav-scrolled: rgba(15, 23, 42, 0.95);
+        /* --primary (#6366f1) の rgba バリアント — アルファ値別に一元管理 */
+        --primary-05: rgba(99, 102, 241, 0.05);
+        --primary-10: rgba(99, 102, 241, 0.1);
+        --primary-15: rgba(99, 102, 241, 0.15);
+        --primary-20: rgba(99, 102, 241, 0.2);
+        --primary-30: rgba(99, 102, 241, 0.3);
+        --primary-40: rgba(99, 102, 241, 0.4);
+        --primary-50: rgba(99, 102, 241, 0.5);
+        /* --accent (#22d3ee) の rgba バリアント */
+        --accent-08: rgba(34, 211, 238, 0.08);
+        --accent-10: rgba(34, 211, 238, 0.1);
+        /* グラデーション中間色 #8b5cf6 の rgba バリアント（gradient-1 で使用） */
+        --purple-10: rgba(139, 92, 246, 0.1);
+        --purple-20: rgba(139, 92, 246, 0.2);
+        /* グラデーション開始色 #06b6d4 の rgba バリアント（gradient-2 で使用） */
+        --cyan-dark-20: rgba(6, 182, 212, 0.2);
+        /* --accent-green (#10b981) の rgba バリアント */
+        --accent-green-20: rgba(16, 185, 129, 0.2);
+        --accent-green-35: rgba(16, 185, 129, 0.35);
+        /* グラデーション終端色 #34d399 の rgba バリアント（gradient-3 で使用） */
+        --green-light-20: rgba(52, 211, 153, 0.2);
+        /* テキストミュート系 (#94a3b8) の rgba バリアント */
+        --muted-15: rgba(148, 163, 184, 0.15);
+        /* 失敗状態色 (#ef4444) の rgba バリアント */
+        --failure-35: rgba(239, 68, 68, 0.35);
       }
 
       * {
@@ -140,17 +165,17 @@
         height: 200%;
         background: radial-gradient(
             circle at 20% 80%,
-            rgba(99, 102, 241, 0.15) 0%,
+            var(--primary-15) 0%,
             transparent 50%
           ),
           radial-gradient(
             circle at 80% 20%,
-            rgba(139, 92, 246, 0.1) 0%,
+            var(--purple-10) 0%,
             transparent 50%
           ),
           radial-gradient(
             circle at 40% 40%,
-            rgba(34, 211, 238, 0.08) 0%,
+            var(--accent-08) 0%,
             transparent 40%
           );
         animation: bgFloat 20s ease-in-out infinite;
@@ -362,12 +387,12 @@
       .btn-primary {
         background: var(--gradient-1);
         color: white;
-        box-shadow: 0 4px 20px rgba(99, 102, 241, 0.4);
+        box-shadow: 0 4px 20px var(--primary-40);
       }
 
       .btn-primary:hover {
         transform: translateY(-3px);
-        box-shadow: 0 8px 30px rgba(99, 102, 241, 0.5);
+        box-shadow: 0 8px 30px var(--primary-50);
       }
 
       .btn-secondary {
@@ -379,7 +404,7 @@
 
       .btn-secondary:hover {
         border-color: var(--primary);
-        background: rgba(99, 102, 241, 0.1);
+        background: var(--primary-10);
       }
 
       @keyframes fadeInUp {
@@ -628,7 +653,7 @@
 
       .skill-card:hover {
         transform: translateY(-8px);
-        border-color: rgba(99, 102, 241, 0.3);
+        border-color: var(--primary-30);
         box-shadow: var(--shadow-glow);
       }
 
@@ -648,13 +673,13 @@
       }
 
       .skill-icon.purple {
-        background: linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(139, 92, 246, 0.2));
+        background: linear-gradient(135deg, var(--primary-20), var(--purple-20));
       }
       .skill-icon.cyan {
-        background: linear-gradient(135deg, rgba(6, 182, 212, 0.2), rgba(34, 211, 238, 0.2));
+        background: linear-gradient(135deg, var(--cyan-dark-20), var(--accent-10));
       }
       .skill-icon.green {
-        background: linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(52, 211, 153, 0.2));
+        background: linear-gradient(135deg, var(--accent-green-20), var(--green-light-20));
       }
 
       .skill-card h3 {
@@ -675,14 +700,14 @@
         border-radius: 50px;
         font-size: 0.85rem;
         font-weight: 500;
-        background: rgba(99, 102, 241, 0.1);
+        background: var(--primary-10);
         color: var(--primary-light);
-        border: 1px solid rgba(99, 102, 241, 0.2);
+        border: 1px solid var(--primary-20);
         transition: all 0.3s ease;
       }
 
       .skill-tag:hover {
-        background: rgba(99, 102, 241, 0.2);
+        background: var(--primary-20);
         transform: scale(1.05);
       }
 
@@ -719,7 +744,7 @@
 
       .cert-card:hover {
         transform: translateX(10px);
-        border-color: rgba(99, 102, 241, 0.3);
+        border-color: var(--primary-30);
         box-shadow: var(--shadow-glow);
       }
 
@@ -731,7 +756,7 @@
         width: 70px;
         height: 70px;
         border-radius: 16px;
-        background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(139, 92, 246, 0.1));
+        background: linear-gradient(135deg, var(--primary-10), var(--purple-10));
         display: flex;
         align-items: center;
         justify-content: center;
@@ -835,7 +860,7 @@
         font-size: 0.85rem;
         font-weight: 600;
         color: var(--accent);
-        background: rgba(34, 211, 238, 0.1);
+        background: var(--accent-10);
         padding: 0.3rem 1rem;
         border-radius: 50px;
         margin-bottom: 0.8rem;
@@ -850,7 +875,7 @@
       }
 
       .timeline-item:hover .timeline-content {
-        border-color: rgba(99, 102, 241, 0.3);
+        border-color: var(--primary-30);
         box-shadow: var(--shadow-glow);
       }
 
@@ -878,7 +903,7 @@
         background: linear-gradient(
           180deg,
           transparent 0%,
-          rgba(99, 102, 241, 0.05) 100%
+          var(--primary-05) 100%
         );
       }
 
@@ -940,7 +965,7 @@
         justify-content: center;
         font-size: 2rem;
         margin-bottom: 1.5rem;
-        background: linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(139, 92, 246, 0.2));
+        background: linear-gradient(135deg, var(--primary-20), var(--purple-20));
         transition: all 0.3s ease;
       }
 
@@ -1104,7 +1129,7 @@
 
       .work-card:hover {
         transform: translateY(-8px);
-        border-color: rgba(99, 102, 241, 0.3);
+        border-color: var(--primary-30);
         box-shadow: var(--shadow-glow);
       }
 
@@ -1131,7 +1156,7 @@
       }
 
       .work-badge.sub {
-        background: rgba(148, 163, 184, 0.15);
+        background: var(--muted-15);
         color: var(--text-muted);
         border: 1px solid var(--border);
       }
@@ -1204,7 +1229,7 @@
 
       a.proof-badge:hover {
         transform: translateY(-2px);
-        border-color: rgba(99, 102, 241, 0.4);
+        border-color: var(--primary-40);
       }
 
       .proof-badge .proof-dot {
@@ -1227,11 +1252,11 @@
 
       .proof-badge.is-success {
         color: var(--accent-green);
-        border-color: rgba(16, 185, 129, 0.35);
+        border-color: var(--accent-green-35);
       }
       .proof-badge.is-failure {
         color: var(--color-failure-text);
-        border-color: rgba(239, 68, 68, 0.35);
+        border-color: var(--failure-35);
       }
 
       .work-proof-meta {

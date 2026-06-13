@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-06-12T22:18:25.663Z",
+  "generated_at": "2026-06-13T21:55:52.007Z",
   "repos": [
     {
       "key": "helpdesk-hub",
@@ -74,14 +74,14 @@
       "name": "profile-portfolio",
       "url": "https://github.com/izumacha/profile-portfolio",
       "ci": {
-        "status": "success",
-        "run_url": "https://github.com/izumacha/profile-portfolio/actions/runs/27434729821",
+        "status": "none",
+        "run_url": "",
         "branch": "main"
       },
       "last_commit": {
-        "iso": "2026-06-12T18:21:54Z",
-        "sha7": "1336c2d",
-        "url": "https://github.com/izumacha/profile-portfolio/commit/1336c2d0bd54844e78cc87012e33aa4bfc007983"
+        "iso": "2026-06-12T22:18:25Z",
+        "sha7": "4eddb37",
+        "url": "https://github.com/izumacha/profile-portfolio/commit/4eddb37953df760e65e5fbe0c2c3e46a506a027a"
       },
       "languages": [
         "HTML",

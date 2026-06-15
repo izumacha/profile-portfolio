@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-06-14T22:01:37.854Z",
+  "generated_at": "2026-06-15T22:54:17.784Z",
   "repos": [
     {
       "key": "helpdesk-hub",
@@ -7,13 +7,13 @@
       "url": "https://github.com/izumacha/helpdesk-hub",
       "ci": {
         "status": "success",
-        "run_url": "https://github.com/izumacha/helpdesk-hub/actions/runs/27504731782",
+        "run_url": "https://github.com/izumacha/helpdesk-hub/actions/runs/27560660831",
         "branch": "main"
       },
       "last_commit": {
-        "iso": "2026-06-14T16:15:45Z",
-        "sha7": "ab1f95b",
-        "url": "https://github.com/izumacha/helpdesk-hub/commit/ab1f95bf6d4b9595a46f72199f80d4b8db9b1734"
+        "iso": "2026-06-15T16:26:30Z",
+        "sha7": "a7e86eb",
+        "url": "https://github.com/izumacha/helpdesk-hub/commit/a7e86ebcff78252361b04a5238a964dca94411c7"
       },
       "languages": [
         "TypeScript",
@@ -30,13 +30,13 @@
       "url": "https://github.com/izumacha/incident-insight",
       "ci": {
         "status": "success",
-        "run_url": "https://github.com/izumacha/incident-insight/actions/runs/27481517763",
+        "run_url": "https://github.com/izumacha/incident-insight/actions/runs/27560643100",
         "branch": "main"
       },
       "last_commit": {
-        "iso": "2026-06-13T22:52:09Z",
-        "sha7": "72b6d49",
-        "url": "https://github.com/izumacha/incident-insight/commit/72b6d498b10a7fd5f55e54ecabe1dcf27213efac"
+        "iso": "2026-06-15T16:26:12Z",
+        "sha7": "a8ffc0f",
+        "url": "https://github.com/izumacha/incident-insight/commit/a8ffc0fec260929ef47587e96fcbbb9939d9ad16"
       },
       "languages": [
         "C#",
@@ -79,9 +79,9 @@
         "branch": "main"
       },
       "last_commit": {
-        "iso": "2026-06-13T21:55:52Z",
-        "sha7": "21085aa",
-        "url": "https://github.com/izumacha/profile-portfolio/commit/21085aae5a9ec0d8d31a45976e29adb9838f8426"
+        "iso": "2026-06-14T22:01:37Z",
+        "sha7": "086ac7f",
+        "url": "https://github.com/izumacha/profile-portfolio/commit/086ac7f7b85251829353807ca6dfd281c9f65acb"
       },
       "languages": [
         "HTML",

@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-06-30T22:07:24.728Z",
+  "generated_at": "2026-07-01T22:12:07.658Z",
   "repos": [
     {
       "key": "helpdesk-hub",
@@ -7,13 +7,13 @@
       "url": "https://github.com/izumacha/helpdesk-hub",
       "ci": {
         "status": "success",
-        "run_url": "https://github.com/izumacha/helpdesk-hub/actions/runs/28467216632",
+        "run_url": "https://github.com/izumacha/helpdesk-hub/actions/runs/28540409046",
         "branch": "main"
       },
       "last_commit": {
-        "iso": "2026-06-30T18:31:53Z",
-        "sha7": "262a4e0",
-        "url": "https://github.com/izumacha/helpdesk-hub/commit/262a4e00dbae3daf0d8cf34cba4766d6ef19d0a2"
+        "iso": "2026-07-01T18:52:09Z",
+        "sha7": "d79d530",
+        "url": "https://github.com/izumacha/helpdesk-hub/commit/d79d530f9d888e41019c137bd5c3da55023b7ae3"
       },
       "languages": [
         "TypeScript",
@@ -22,7 +22,7 @@
         "JavaScript",
         "CSS"
       ],
-      "test_file_count": 61,
+      "test_file_count": 63,
       "stale": false
     },
     {
@@ -77,13 +77,13 @@
       "url": "https://github.com/izumacha/profile-portfolio",
       "ci": {
         "status": "success",
-        "run_url": "https://github.com/izumacha/profile-portfolio/actions/runs/28411312742",
+        "run_url": "https://github.com/izumacha/profile-portfolio/actions/runs/28484600881",
         "branch": "main"
       },
       "last_commit": {
-        "iso": "2026-06-30T00:14:00Z",
-        "sha7": "8661726",
-        "url": "https://github.com/izumacha/profile-portfolio/commit/86617267ef2e49dcf4731096ccbb9a649e2e4843"
+        "iso": "2026-07-01T00:19:35Z",
+        "sha7": "047e992",
+        "url": "https://github.com/izumacha/profile-portfolio/commit/047e992f32a634b5aa2647f3c3bea8c5830f439e"
       },
       "languages": [
         "HTML",

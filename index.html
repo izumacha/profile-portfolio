@@ -22,7 +22,7 @@
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'sha256-okbJ7/9eOy3Efrm6qr5uBNipgfTlRjmpdZq1RKl+r1U='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'"
+      content="default-src 'self'; script-src 'self' 'sha256-qVP2C2lYYOthur6YPg7n815CFla8hcprQVe9MWlOMzQ='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'"
     />
     <meta name="referrer" content="strict-origin-when-cross-origin" />
 
@@ -70,7 +70,6 @@
       :root {
         --primary: #6366f1;
         --primary-light: #a5b4fc;
-        --primary-dark: #4f46e5;
         /* --primary の RGB 3値（任意の透明度で rgba() を組み立てるための一元管理。直書き禁止の方針に準拠） */
         --primary-rgb: 99, 102, 241;
         /* --gradient-1 の中間色(#8b5cf6)の RGB 3値 */
@@ -80,18 +79,17 @@
         --accent: #22d3ee;
         /* --accent の RGB 3値 */
         --accent-rgb: 34, 211, 238;
-        /* --gradient-2 の開始色(#06b6d4)の RGB 3値 */
+        /* .skill-icon.cyan のグラデーションで使う開始色(#06b6d4)の RGB 3値 */
         --cyan-rgb: 6, 182, 212;
         --accent-green: #10b981;
         /* --accent-green の RGB 3値 */
         --accent-green-rgb: 16, 185, 129;
-        /* --gradient-3 の終了色(#34d399)の RGB 3値 */
+        /* .skill-icon.green のグラデーションで使う終了色(#34d399)の RGB 3値 */
         --green-light-rgb: 52, 211, 153;
         /* エラー系ボーダー等で使う赤（--color-heart と同色）の RGB 3値 */
         --red-rgb: 239, 68, 68;
         --bg-dark: #0f172a;
         --bg-card: rgba(30, 41, 59, 0.9);
-        --bg-card-hover: rgba(51, 65, 85, 0.95);
         --text-primary: #ffffff;
         --text-secondary: #e2e8f0;
         --text-muted: #cbd5e1;
@@ -99,8 +97,6 @@
         /* --text-muted の 15% 透明度バリアント（.work-badge.sub の背景色で使用） */
         --muted-15: rgba(148, 163, 184, 0.15);
         --gradient-1: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #d946ef 100%);
-        --gradient-2: linear-gradient(135deg, #06b6d4 0%, #22d3ee 100%);
-        --gradient-3: linear-gradient(135deg, #10b981 0%, #34d399 100%);
         /* --primary のグロー影（--primary-30 を参照して一元管理） */
         --shadow-glow: 0 0 40px var(--primary-30);
         /* コードブロック構文ハイライト用の色トークン（直書き禁止の方針に準拠） */
@@ -115,6 +111,14 @@
         /* ナビバーの背景色（--bg-dark の rgba バリアント）— 直書き禁止に準拠 */
         --bg-nav: rgba(15, 23, 42, 0.8);
         --bg-nav-scrolled: rgba(15, 23, 42, 0.95);
+        /* バッジ用の色トークン（CSS 変数経由・直書き禁止の方針に準拠。Live self-proof badges で使用） */
+        --badge-bg: rgba(148, 163, 184, 0.12);
+        --badge-border: var(--border);
+        --status-success: var(--accent-green);
+        /* CI 失敗バッジ色：--color-heart と同値のため変数参照で一元管理 */
+        --status-failure: var(--color-heart);
+        --status-neutral: var(--text-muted);
+        --status-running: var(--accent);
       }
 
       * {
@@ -258,6 +262,52 @@
 
       .nav-links a:hover::after {
         width: 100%;
+      }
+
+      /* ハンバーガーメニューのボタン本体。968px超（デスクトップ）では非表示にし、
+         968px以下のメディアクエリ（下記）で display: inline-flex に切り替えて表示する */
+      .nav-toggle {
+        display: none;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        gap: 5px;
+        width: 40px;
+        height: 40px;
+        padding: 8px;
+        background: transparent;
+        /* 疑似ボタン化ではなく本物の <button> 要素なので枠線・背景をリセットするだけでよい */
+        border: none;
+        border-radius: 8px;
+        cursor: pointer;
+      }
+
+      /* キーボード操作時にフォーカスリングを明示する（§7 a11y: outlineを消さない） */
+      .nav-toggle:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
+
+      .nav-toggle__bar {
+        display: block;
+        width: 100%;
+        height: 2px;
+        background: var(--text-primary);
+        border-radius: 2px;
+        transition: transform 0.3s ease, opacity 0.3s ease;
+      }
+
+      /* メニュー展開中はハンバーガーの3本線を×字に変形させる（JSが nav-toggle--open クラスを付与） */
+      .nav-toggle--open .nav-toggle__bar:nth-child(1) {
+        transform: translateY(7px) rotate(45deg);
+      }
+
+      .nav-toggle--open .nav-toggle__bar:nth-child(2) {
+        opacity: 0;
+      }
+
+      .nav-toggle--open .nav-toggle__bar:nth-child(3) {
+        transform: translateY(-7px) rotate(-45deg);
       }
 
       /* Hero Section */
@@ -1009,8 +1059,37 @@
           grid-template-columns: repeat(3, 1fr);
         }
 
+        /* 968px以下ではハンバーガーボタンを表示する（デスクトップでは上の基本ルールで非表示） */
+        .nav-toggle {
+          display: inline-flex;
+        }
+
+        /* 968px以下ではリンク一覧を既定で折りたたみ、ナビバー直下にドロップダウン表示する */
         .nav-links {
           display: none;
+          position: absolute;
+          top: 100%;
+          left: 0;
+          right: 0;
+          flex-direction: column;
+          gap: 0;
+          padding: 0.5rem 2rem 1rem;
+          background: var(--bg-nav-scrolled);
+          border-bottom: 1px solid var(--border);
+        }
+
+        /* JSが付与する開閉クラス（BEM風モディファイア）。付いている間だけドロップダウンを表示する */
+        .nav-links--open {
+          display: flex;
+        }
+
+        .nav-links li {
+          padding: 0.75rem 0;
+          border-bottom: 1px solid var(--border);
+        }
+
+        .nav-links li:last-child {
+          border-bottom: none;
         }
       }
 
@@ -1187,18 +1266,7 @@
         margin-bottom: 1.5rem;
       }
 
-      /* Live self-proof badges (CI 状態・最終コミット・言語をライブ表示) */
-      :root {
-        /* バッジ用の色トークン（CSS 変数経由・直書き禁止の方針に準拠） */
-        --badge-bg: rgba(148, 163, 184, 0.12);
-        --badge-border: var(--border);
-        --status-success: var(--accent-green);
-        /* CI 失敗バッジ色：--color-heart と同値のため変数参照で一元管理 */
-        --status-failure: var(--color-heart);
-        --status-neutral: var(--text-muted);
-        --status-running: var(--accent);
-      }
-
+      /* Live self-proof badges (CI 状態・最終コミット・言語をライブ表示)。色トークンは先頭の :root に統合済み */
       .work-proof {
         display: flex;
         flex-wrap: wrap;
@@ -1281,7 +1349,22 @@
     <nav class="nav">
       <div class="nav-content">
         <div class="nav-logo">M.I</div>
-        <ul class="nav-links">
+        <!--
+          ハンバーガーメニューのボタン。div/span への onClick 疑似ボタン化はせず、本物の <button> を使う（§7 a11y）。
+          aria-expanded は開閉状態に応じて JS が true/false を書き換え、aria-controls で対象の <ul> を明示する。
+        -->
+        <button
+          type="button"
+          class="nav-toggle"
+          aria-label="メニューを開く"
+          aria-expanded="false"
+          aria-controls="nav-links"
+        >
+          <span class="nav-toggle__bar"></span>
+          <span class="nav-toggle__bar"></span>
+          <span class="nav-toggle__bar"></span>
+        </button>
+        <ul class="nav-links" id="nav-links">
           <li><a href="#about">About</a></li>
           <li><a href="#skills">Skills</a></li>
           <li><a href="#works">Works</a></li>
@@ -1815,6 +1898,43 @@
           nav.classList.remove("nav--scrolled");
         }
       });
+
+      // ---- ハンバーガーメニュー: 968px以下で .nav-links の表示をトグルする ----
+      const NAV_OPEN_CLASS = "nav-links--open"; // 開いた状態を表すBEM風モディファイアクラス
+      const navToggle = document.querySelector(".nav-toggle"); // ハンバーガーボタン要素
+      const navLinks = document.querySelector(".nav-links"); // ナビゲーションリンク一覧（<ul>）
+
+      // 開閉状態を1箇所にまとめて反映する関数（表示クラス・aria-expanded・ラベル・アイコン見た目を同期させる）
+      function setNavOpen(isOpen) {
+        navLinks.classList.toggle(NAV_OPEN_CLASS, isOpen); // 開閉クラスを付け外しする
+        navToggle.classList.toggle("nav-toggle--open", isOpen); // ハンバーガー→×アイコンの見た目切り替え用クラス
+        navToggle.setAttribute("aria-expanded", String(isOpen)); // スクリーンリーダーに開閉状態を伝える
+        // ボタンラベルも状態に合わせて更新する（開いているときは「閉じる」と案内する）
+        navToggle.setAttribute("aria-label", isOpen ? "メニューを閉じる" : "メニューを開く");
+      }
+
+      if (navToggle && navLinks) {
+        // ボタンクリック（Enter/Spaceキーでも <button> は同じ click イベントを発火する）で開閉状態を反転させる
+        navToggle.addEventListener("click", () => {
+          const isOpen = !navLinks.classList.contains(NAV_OPEN_CLASS); // 現在の逆の状態を計算する
+          setNavOpen(isOpen); // 計算した状態を反映する
+        });
+
+        // Escキーでメニューを閉じ、操作していたボタンへフォーカスを戻す（キーボード操作性の確保。§7 a11y）
+        document.addEventListener("keydown", (e) => {
+          if (e.key === "Escape" && navLinks.classList.contains(NAV_OPEN_CLASS)) {
+            setNavOpen(false); // メニューを閉じる
+            navToggle.focus(); // フォーカスをボタンへ戻す
+          }
+        });
+
+        // リンクをクリックしたらメニューを閉じる（モバイルでページ内リンクへ移動した後に開いたままにしない）
+        navLinks.querySelectorAll("a").forEach((link) => {
+          link.addEventListener("click", () => {
+            setNavOpen(false); // メニューを閉じる
+          });
+        });
+      }
 
       const OBSERVER_ROOT_MARGIN = "0px 0px -50px 0px"; // 画面下端より手前で発火させるマージン
       const OBSERVER_THRESHOLD = 0.1; // 要素の10%が画面内に入ったら発火する割合

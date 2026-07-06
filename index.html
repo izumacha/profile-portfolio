@@ -13,9 +13,11 @@
       base64(SHA-256(exact text between the script open and close tags)) and
       replacing the sha256-... token below. The JSON-LD block (type
       application/ld+json) is data, not executed, so it is not governed by
-      script-src. style-src keeps 'unsafe-inline' because the inline style block
-      and one style="" attribute cannot be hashed here; style injection is far
-      lower risk than script injection. Limitation: frame-ancestors /
+      script-src. style-src keeps 'unsafe-inline' because the inline <style>
+      block in <head> cannot be hashed here (per-element style="" attributes
+      have since been replaced by CSS classes, e.g. .cert-link--disabled, so
+      that is no longer a reason); style injection is far lower risk than
+      script injection. Limitation: frame-ancestors /
       X-Frame-Options and X-Content-Type-Options are header-only (ignored in a
       meta tag), so clickjacking / nosniff hardening needs a real HTTP header,
       which GitHub Pages cannot set (tracked separately).

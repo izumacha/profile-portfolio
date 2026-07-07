@@ -24,7 +24,7 @@
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'sha256-qVP2C2lYYOthur6YPg7n815CFla8hcprQVe9MWlOMzQ='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'"
+      content="default-src 'self'; script-src 'self' 'sha256-glVtn0NKwRlAAnivscCJXErxdTContKhNSeTfMqBxfM='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'"
     />
     <meta name="referrer" content="strict-origin-when-cross-origin" />
 
@@ -1935,6 +1935,16 @@
           link.addEventListener("click", () => {
             setNavOpen(false); // メニューを閉じる
           });
+        });
+
+        // デスクトップ幅（CSSの968pxブレークポイントを超えた状態）を判定するMediaQueryList。
+        // モバイル幅でメニューを開いたまま画面をデスクトップ幅まで広げた（またはタブレット回転した）場合に、
+        // 開閉クラス・aria-expandedが実態と食い違ったまま残らないよう、ブレークポイントを跨いだ瞬間に必ず閉状態へリセットする。
+        const desktopMediaQuery = window.matchMedia("(min-width: 969px)");
+        desktopMediaQuery.addEventListener("change", (e) => {
+          if (e.matches) {
+            setNavOpen(false); // デスクトップ幅に入ったのでモバイル用の開閉状態を強制的に閉じる
+          }
         });
       }
 

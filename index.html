@@ -169,6 +169,14 @@
         outline-offset: 2px;
       }
 
+      /* #main-content はスキップリンク遷移後にプログラム的にフォーカスされるだけの
+         ランドマークであり、ページ全体を囲む枠線を表示すると見た目が崩れるため outline
+         を消す。フォーカス位置の可視化はスキップリンク自体の :focus-visible と、
+         直後の scrollIntoView によるスクロール位置そのものが代替として機能する（§7 a11y） */
+      #main-content:focus {
+        outline: none;
+      }
+
       /* Animated Background */
       .bg-animation {
         position: fixed;
@@ -1402,8 +1410,11 @@
       </div>
     </nav>
 
-    <!-- 本文の主要ランドマーク。スキップリンクの遷移先でもある（§7 a11y） -->
-    <main id="main-content">
+    <!-- 本文の主要ランドマーク。スキップリンクの遷移先でもある（§7 a11y）。
+         tabindex="-1" を付け、下の JS でスキップリンク活性化後にここへフォーカスを
+         移すことで、Tab キーが「本文の続き」ではなく「ナビゲーションの先頭」へ
+         戻ってしまう(=スキップリンクが機能しない)不具合を防ぐ -->
+    <main id="main-content" tabindex="-1">
     <!-- Hero Section -->
     <section class="hero">
       <div class="hero-content">
@@ -1911,6 +1922,10 @@
               behavior: prefersReducedMotion ? "auto" : "smooth",
               block: "start", // 要素の上端が画面上部に来るようにする
             });
+            // キーボードフォーカスも遷移先へ移す（スキップリンク用。tabindex="-1" が
+            // 無い通常のセクション要素では focus() は無視されるだけなので他リンクへの
+            // 影響はない）。preventScroll: true で scrollIntoView 済みの位置がずれるのを防ぐ
+            target.focus({ preventScroll: true });
           }
         });
       });

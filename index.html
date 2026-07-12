@@ -99,6 +99,10 @@
         /* --text-muted の 15% 透明度バリアント（.work-badge.sub の背景色で使用） */
         --muted-15: rgba(148, 163, 184, 0.15);
         --gradient-1: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #d946ef 100%);
+        /* 白文字を上に重ねるボタン/バッジ専用の高コントラスト版。--gradient-1 は末尾の
+           #d946ef 付近で白文字とのコントラストが WCAG AA 4.5:1 を下回るため、
+           全stopで4.5:1以上を確保した濃色版を別トークンとして用意する（§7 a11y） */
+        --gradient-1-solid-text: linear-gradient(135deg, #4f46e5 0%, #7c3aed 50%, #c026d3 100%);
         /* --primary のグロー影（--primary-30 を参照して一元管理） */
         --shadow-glow: 0 0 40px var(--primary-30);
         /* コードブロック構文ハイライト用の色トークン（直書き禁止の方針に準拠） */
@@ -142,6 +146,27 @@
         overflow-x: hidden;
         -webkit-font-smoothing: antialiased;
         -moz-osx-font-smoothing: grayscale;
+      }
+
+      /* スキップリンク: 通常は画面外に隠し、キーボードフォーカス時だけ左上に表示する（§7 a11y） */
+      .skip-link {
+        position: absolute;
+        top: -100%;
+        left: 0;
+        z-index: 2000;
+        padding: 0.75rem 1.5rem;
+        background: var(--primary);
+        color: white;
+        border-radius: 0 0 8px 0;
+        text-decoration: none;
+        font-weight: 600;
+        transition: top 0.2s ease;
+      }
+
+      .skip-link:focus-visible {
+        top: 0;
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
       }
 
       /* Animated Background */
@@ -432,7 +457,8 @@
       }
 
       .btn-primary {
-        background: var(--gradient-1);
+        /* 白文字のコントラストを確保するため高コントラスト版を使う（--gradient-1 参照） */
+        background: var(--gradient-1-solid-text);
         color: white;
         box-shadow: 0 4px 20px rgba(var(--primary-rgb), 0.4);
       }
@@ -1057,10 +1083,6 @@
           gap: 3rem;
         }
 
-        .about-stats {
-          grid-template-columns: repeat(3, 1fr);
-        }
-
         /* 968px以下ではハンバーガーボタンを表示する（デスクトップでは上の基本ルールで非表示） */
         .nav-toggle {
           display: inline-flex;
@@ -1228,8 +1250,9 @@
         font-size: 0.75rem;
         font-weight: 700;
         letter-spacing: 0.05em;
-        background: var(--gradient-1);
-        /* var(--gradient-1) 背景に対して十分なコントラストを確保するため白テキストが必須（--text-primary の値を変更する際は gradient-1 とのコントラスト比を確認すること） */
+        /* 白文字のコントラストを確保するため高コントラスト版を使う（--gradient-1 参照） */
+        background: var(--gradient-1-solid-text);
+        /* var(--gradient-1-solid-text) は全stopでWCAG AA 4.5:1以上を確保しているため白テキストが必須（--text-primary の値を変更する際はコントラスト比を再確認すること） */
         color: var(--text-primary);
       }
 
@@ -1345,6 +1368,8 @@
     </style>
   </head>
   <body>
+    <!-- スキップリンク: キーボード利用者がナビゲーションを飛ばして本文へ直接移動できるようにする（§7 a11y） -->
+    <a href="#main-content" class="skip-link">本文へスキップ</a>
     <div class="bg-animation"></div>
 
     <!-- Navigation -->
@@ -1377,6 +1402,8 @@
       </div>
     </nav>
 
+    <!-- 本文の主要ランドマーク。スキップリンクの遷移先でもある（§7 a11y） -->
+    <main id="main-content">
     <!-- Hero Section -->
     <section class="hero">
       <div class="hero-content">
@@ -1854,6 +1881,7 @@
         </div>
       </div>
     </section>
+    </main>
 
     <!-- Footer -->
     <footer class="footer">

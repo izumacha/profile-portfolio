@@ -1,5 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Masaki Izumi">
-  <!-- サイト本体の --primary(#6366f1) → --accent(#22d3ee) と揃えたブランドグラデーション背景 -->
+  <!-- サイト本体の primary色(#6366f1) から accent色(#22d3ee) と揃えたブランドグラデーション背景。
+       XML コメントは内部に二重ハイフンを含められない（閉じタグの直前を除く）ため、
+       CSS変数名の先頭記号は本文中に書かない -->
   <defs>
     <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#6366f1" />

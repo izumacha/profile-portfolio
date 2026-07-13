@@ -28,6 +28,9 @@
     />
     <meta name="referrer" content="strict-origin-when-cross-origin" />
 
+    <!-- ファビコン: 同一オリジンの SVG ファイルを参照する（CSP の img-src 'self' に準拠。data: URI は 'self' に含まれず遮断されるため使わない） -->
+    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+
     <title>Masaki Izumi | Full-Stack Engineer</title>
     <meta
       name="description"

@@ -888,11 +888,16 @@
         color: white;
       }
 
-      /* 未リンクの証明バッジ（Verified ラベル等、クリック不可の状態） */
+      /* 未リンクの証明バッジ（Verified ラベル等、クリック不可の状態）。
+         opacity で単純に薄くすると、文字色・枠線色ともにカード背景との
+         コントラスト比が WCAG AA 4.5:1（枠線は非テキストの 3:1）を下回るため、
+         opacity は使わず既存の --text-muted トークンで文字色・枠線色を
+         明示的に指定して「無効」の見た目を表現する（§7 a11y） */
       .cert-link--disabled {
-        opacity: 0.5;
         cursor: default;
         pointer-events: none;
+        color: var(--text-muted);
+        border-color: var(--text-muted);
       }
 
       /* Timeline Section */

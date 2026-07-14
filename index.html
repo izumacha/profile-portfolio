@@ -887,7 +887,9 @@
       }
 
       .cert-link:hover {
-        background: var(--primary);
+        /* var(--primary) 単色は白文字とのコントラストが 4.47:1 で WCAG AA 4.5:1 をわずかに
+           下回るため、他の白文字バッジ/ボタンと同じ高コントラスト版を使う（--gradient-1 参照） */
+        background: var(--gradient-1-solid-text);
         color: white;
       }
 

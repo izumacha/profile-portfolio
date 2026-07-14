@@ -560,7 +560,10 @@
         html {
           scroll-behavior: auto;
         }
-        /* ホバー時のカード移動を抑制する */
+        /* ホバー時のカード移動を抑制する（.stat-item は About セクションの数値カードで、
+           他のカード群と同じ transition: all 0.3s ease + hover時 translateY を持つため
+           同じ抑制対象に含める） */
+        .stat-item,
         .skill-card,
         .work-card,
         .cert-card,

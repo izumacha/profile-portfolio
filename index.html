@@ -98,7 +98,10 @@
         --text-primary: #ffffff;
         --text-secondary: #e2e8f0;
         --text-muted: #cbd5e1;
-        --border: rgba(148, 163, 184, 0.2);
+        /* カード境界線。alpha 0.2 では --bg-card 上で非テキストUIのWCAG 3:1(SC 1.4.11)を
+           満たさないため 0.65 に引き上げ済み(§7 a11y)。カード背景との合成後コントラスト比は
+           約3.32:1 */
+        --border: rgba(148, 163, 184, 0.65);
         /* --text-muted の 15% 透明度バリアント（.work-badge.sub の背景色で使用） */
         --muted-15: rgba(148, 163, 184, 0.15);
         --gradient-1: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #d946ef 100%);

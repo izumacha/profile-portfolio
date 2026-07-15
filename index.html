@@ -582,6 +582,15 @@
         .proof-badge {
           transition: none;
         }
+        /* Contact カードのアイコンは独自の transition: all 0.3s ease を持ち、
+           hover 時に scale(1.1) するため、他のカードと同様に抑制対象へ含める */
+        .contact-icon,
+        /* skill-card / work-card 上部のアクセントバー(::before)は要素本体とは別に
+           独自の transition を持つため継承されず、個別に抑制する必要がある */
+        .skill-card::before,
+        .work-card::before {
+          transition: none;
+        }
       }
 
       /* Container */

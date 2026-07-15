@@ -397,7 +397,8 @@
 
       .link-item::after,
       .cert-link::after,
-      .project-link::after {
+      .project-link::after,
+      .print-url::after {
         /* 紙面ではリンクを辿れないため、URL をテキストとして併記する */
         content: " (" attr(href) ")";
         font-size: 0.75em;
@@ -421,11 +422,11 @@
         </div>
         <div class="contact-item">
           <span aria-hidden="true">🐙</span>
-          <a href="https://github.com/izumacha" target="_blank" rel="noopener noreferrer">GitHub</a>
+          <a href="https://github.com/izumacha" class="print-url" target="_blank" rel="noopener noreferrer">GitHub</a>
         </div>
         <div class="contact-item">
           <span aria-hidden="true">💼</span>
-          <a href="https://github.com/izumacha/profile-portfolio" target="_blank" rel="noopener noreferrer">Portfolio</a>
+          <a href="https://github.com/izumacha/profile-portfolio" class="print-url" target="_blank" rel="noopener noreferrer">Portfolio</a>
         </div>
       </div>
     </header>

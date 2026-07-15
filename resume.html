@@ -369,6 +369,31 @@
         grid-template-columns: 1fr;
       }
     }
+
+    @media print {
+      * {
+        /* 既定では背景色が印刷されず、白文字のバッジ等が読めなくなるのを防ぐ */
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+
+      .timeline-item,
+      .project-item,
+      .cert-item {
+        /* ページ境界でカードが分断されて読みにくくなるのを防ぐ */
+        break-inside: avoid;
+        page-break-inside: avoid;
+      }
+
+      .link-item::after,
+      .cert-link::after {
+        /* 紙面ではリンクを辿れないため、URL をテキストとして併記する */
+        content: " (" attr(href) ")";
+        font-size: 0.75em;
+        font-weight: 400;
+        word-break: break-all;
+      }
+    }
   </style>
 </head>
 <body>

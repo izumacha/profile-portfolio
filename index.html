@@ -125,7 +125,11 @@
         --bg-nav-scrolled: rgba(15, 23, 42, 0.95);
         /* バッジ用の色トークン（CSS 変数経由・直書き禁止の方針に準拠。Live self-proof badges で使用） */
         --badge-bg: rgba(148, 163, 184, 0.12);
-        --badge-border: var(--border);
+        /* --border(alpha 0.65)は --bg-card 上で 3:1 を満たす値だが、.proof-badge は
+           それより明るい --badge-bg の上に乗るため合成後コントラストが約2.91:1まで落ちる。
+           .proof-badge 専用に alpha 0.75 へ引き上げ、--badge-bg 上でも約3.37:1(SC 1.4.11)を
+           確保する（§7 a11y） */
+        --badge-border: rgba(148, 163, 184, 0.75);
         --status-success: var(--accent-green);
         /* CI 失敗バッジ色：--color-heart と同値のため変数参照で一元管理 */
         --status-failure: var(--color-heart);
@@ -569,7 +573,13 @@
         .cert-card,
         .contact-card,
         /* タイムラインアイテムのホバー遷移も抑制する */
-        .timeline-item {
+        .timeline-item,
+        /* ボタン・スキルタグ・self-proof バッジのホバー移動も同種のモーションのため抑制対象に含める
+           （.btn-primary は translateY(-3px)、.skill-tag は scale(1.05)、
+           a.proof-badge は translateY(-2px) をそれぞれ hover 時に持つ） */
+        .btn-primary,
+        .skill-tag,
+        .proof-badge {
           transition: none;
         }
       }

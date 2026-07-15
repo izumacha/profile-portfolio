@@ -370,6 +370,16 @@
       }
     }
 
+    /* アクセシビリティ: モーション低減設定を尊重する（§7 の prefers-reduced-motion 対応。
+       index.html 側で導入済みの抑制パターンをこのページの .link-item:hover にも適用する） */
+    @media (prefers-reduced-motion: reduce) {
+      /* .link-item は hover 時に transform: translateY(-2px) を持つため、
+         transition を止めて滑らかな移動アニメーションを抑制する */
+      .link-item {
+        transition: none;
+      }
+    }
+
     @media print {
       * {
         /* 既定では背景色が印刷されず、白文字のバッジ等が読めなくなるのを防ぐ */

@@ -1418,7 +1418,13 @@
            プロパティが無く、実際にホバーで動くのは点(::before)の背景/box-shadowグローと
            .timeline-content の枠線/box-shadowグローのため、この2つを個別に指定する必要がある */
         .timeline-item::before,
-        .timeline-content {
+        .timeline-content,
+        /* ナビリンクのアンダーライン(::after)がホバーで width: 0 → 100% に伸びる動きも抑制する */
+        .nav-links a::after,
+        /* ハンバーガーメニューの3本線(.nav-toggle__bar)がメニュー開閉時に回転・フェードして
+           ×字に変形する動き（.nav-toggle--open 付与時）も抑制する。968px以下でのみ表示される
+           ボタンだが、他の抑制対象と同じくソース末尾のこのブロックにまとめて置く */
+        .nav-toggle__bar {
           transition: none;
         }
       }

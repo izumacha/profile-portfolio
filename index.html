@@ -24,7 +24,7 @@
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'sha256-Qwd/+lM0MhJyURoQKnCVhVTlEfevbf0g+3VNGiga6Jo='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'"
+      content="default-src 'self'; script-src 'self' 'sha256-PexV5wqT4I2aHph2uzP5Dzjf8y9A+rlkHoi7GUrJ548='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'"
     />
     <meta name="referrer" content="strict-origin-when-cross-origin" />
 
@@ -2085,10 +2085,15 @@
           if (!iso) return null; // 値が無ければ整形しない
           const d = new Date(iso); // 文字列を Date に変換
           if (isNaN(d.getTime())) return null; // パース失敗ならスキップ
-          // ゼロ埋めした年月日を組み立てる（%-d 等の非移植指定子は使わない）
-          const y = d.getFullYear(); // 年を4桁で取得する
-          const m = String(d.getMonth() + 1).padStart(2, "0"); // 月を2桁にゼロ埋めする（getMonth は 0 始まりなので +1）
-          const day = String(d.getDate()).padStart(2, "0"); // 日を2桁にゼロ埋めする
+          // ゼロ埋めした年月日を組み立てる（%-d 等の非移植指定子は使わない）。
+          // 入力の iso は update-portfolio-data.yml が書き出す UTC タイムスタンプ（末尾 "Z"）のため、
+          // getFullYear/getMonth/getDate のようなローカルタイムゾーン基準の取得メソッドを使うと、
+          // UTC からの時差で日付がずれる（例: JST は UTC+9 のため、UTC 21:00〜23:59 台の値は
+          // ローカルでは日付が1日進んで表示される）。閲覧者のタイムゾーンに関わらず iso が指す
+          // UTC の暦日をそのまま表示するため、getUTC 系のメソッドで統一する（§10 移植性）。
+          const y = d.getUTCFullYear(); // 年を4桁で取得する（UTC基準）
+          const m = String(d.getUTCMonth() + 1).padStart(2, "0"); // 月を2桁にゼロ埋めする（getUTCMonth は 0 始まりなので +1）
+          const day = String(d.getUTCDate()).padStart(2, "0"); // 日を2桁にゼロ埋めする（UTC基準）
           return `${y}/${m}/${day}`; // 「YYYY/MM/DD」形式で返す
         }
 

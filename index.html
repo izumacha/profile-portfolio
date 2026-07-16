@@ -537,68 +537,6 @@
         }
       }
 
-      /* アクセシビリティ: モーション低減設定を尊重する（§7 の prefers-reduced-motion 対応） */
-      @media (prefers-reduced-motion: reduce) {
-        /* 背景アニメーションを止める */
-        .bg-animation::before {
-          animation: none;
-        }
-        /* アバターの浮遊アニメーションを止める（実際のクラスは .hero-avatar） */
-        .hero-avatar {
-          animation: none;
-        }
-        /* ヒーローセクションの各子要素のフェードインを止めて可視化する（子要素個別に opacity: 0 が設定されているため） */
-        .hero-greeting,
-        .hero-name,
-        .hero-title,
-        .hero-description,
-        .hero-cta {
-          animation: none;
-          opacity: 1;
-        }
-        /* スクロールインジケーターのバウンスを止める */
-        .scroll-indicator {
-          animation: none;
-        }
-        /* CSS の scroll-behavior: smooth をキャンセルしてページ内リンクの瞬間移動を有効にする */
-        html {
-          scroll-behavior: auto;
-        }
-        /* ホバー時のカード移動を抑制する（.stat-item は About セクションの数値カードで、
-           他のカード群と同じ transition: all 0.3s ease + hover時 translateY を持つため
-           同じ抑制対象に含める） */
-        .stat-item,
-        .skill-card,
-        .work-card,
-        .cert-card,
-        .contact-card,
-        /* ボタン・スキルタグ・self-proof バッジのホバー移動も同種のモーションのため抑制対象に含める
-           （.btn-primary は translateY(-3px)、.skill-tag は scale(1.05)、
-           a.proof-badge は translateY(-2px) をそれぞれ hover 時に持つ） */
-        .btn-primary,
-        .skill-tag,
-        .proof-badge,
-        /* Contact カードのアイコンは独自の transition: all 0.3s ease を持ち、
-           hover 時に scale(1.1) するため、他のカードと同様に抑制対象へ含める */
-        .contact-icon,
-        /* skill-card / work-card / cert-card / contact-card 上部・左端のアクセントバーや
-           オーバーレイ(::before)は要素本体とは別に独自の transition を持つため、親要素へ
-           transition: none を指定しても継承されない。個別に抑制する必要がある
-           （skill-card・work-card は transform: scaleX() のバー、cert-card は左端バーの
-           opacity フェード、contact-card は背景オーバーレイの opacity フェード） */
-        .skill-card::before,
-        .work-card::before,
-        .cert-card::before,
-        .contact-card::before,
-        /* タイムラインアイテムのホバー遷移も抑制する。.timeline-item 自体には transition
-           プロパティが無く、実際にホバーで動くのは点(::before)の背景/box-shadowグローと
-           .timeline-content の枠線/box-shadowグローのため、この2つを個別に指定する必要がある */
-        .timeline-item::before,
-        .timeline-content {
-          transition: none;
-        }
-      }
-
       /* Container */
       .container {
         max-width: 1100px;
@@ -1413,6 +1351,76 @@
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
         background-clip: text;
+      }
+
+      /* アクセシビリティ: モーション低減設定を尊重する（§7 の prefers-reduced-motion 対応）。
+         この @media ブロックは意図的にスタイルシートの末尾に置く: CSS のカスケードは
+         詳細度が同じ場合ソースの後方の宣言が勝つ（@media で囲まれているかどうかは
+         勝敗に関係しない）。以前この抑制ブロックはファイル前方（.container の直前）に
+         あったため、後方で宣言される .cert-card::before や .contact-card::before 等の
+         無条件 transition 宣言（詳細度が同じ）にことごとく上書きされ、
+         prefers-reduced-motion: reduce を有効にしても実際にはモーションが止まっていない
+         ものが多数あった（PR #45〜#48 は個々のセレクタの過不足だけを追いかけていたため
+         この根本原因を見落としていた）。同種の再発を防ぐため、末尾に固定する。 */
+      @media (prefers-reduced-motion: reduce) {
+        /* 背景アニメーションを止める */
+        .bg-animation::before {
+          animation: none;
+        }
+        /* アバターの浮遊アニメーションを止める（実際のクラスは .hero-avatar） */
+        .hero-avatar {
+          animation: none;
+        }
+        /* ヒーローセクションの各子要素のフェードインを止めて可視化する（子要素個別に opacity: 0 が設定されているため） */
+        .hero-greeting,
+        .hero-name,
+        .hero-title,
+        .hero-description,
+        .hero-cta {
+          animation: none;
+          opacity: 1;
+        }
+        /* スクロールインジケーターのバウンスを止める */
+        .scroll-indicator {
+          animation: none;
+        }
+        /* CSS の scroll-behavior: smooth をキャンセルしてページ内リンクの瞬間移動を有効にする */
+        html {
+          scroll-behavior: auto;
+        }
+        /* ホバー時のカード移動を抑制する（.stat-item は About セクションの数値カードで、
+           他のカード群と同じ transition: all 0.3s ease + hover時 translateY を持つため
+           同じ抑制対象に含める） */
+        .stat-item,
+        .skill-card,
+        .work-card,
+        .cert-card,
+        .contact-card,
+        /* ボタン・スキルタグ・self-proof バッジのホバー移動も同種のモーションのため抑制対象に含める
+           （.btn-primary は translateY(-3px)、.skill-tag は scale(1.05)、
+           a.proof-badge は translateY(-2px) をそれぞれ hover 時に持つ） */
+        .btn-primary,
+        .skill-tag,
+        .proof-badge,
+        /* Contact カードのアイコンは独自の transition: all 0.3s ease を持ち、
+           hover 時に scale(1.1) するため、他のカードと同様に抑制対象へ含める */
+        .contact-icon,
+        /* skill-card / work-card / cert-card / contact-card 上部・左端のアクセントバーや
+           オーバーレイ(::before)は要素本体とは別に独自の transition を持つため、親要素へ
+           transition: none を指定しても継承されない。個別に抑制する必要がある
+           （skill-card・work-card は transform: scaleX() のバー、cert-card は左端バーの
+           opacity フェード、contact-card は背景オーバーレイの opacity フェード） */
+        .skill-card::before,
+        .work-card::before,
+        .cert-card::before,
+        .contact-card::before,
+        /* タイムラインアイテムのホバー遷移も抑制する。.timeline-item 自体には transition
+           プロパティが無く、実際にホバーで動くのは点(::before)の背景/box-shadowグローと
+           .timeline-content の枠線/box-shadowグローのため、この2つを個別に指定する必要がある */
+        .timeline-item::before,
+        .timeline-content {
+          transition: none;
+        }
       }
     </style>
   </head>

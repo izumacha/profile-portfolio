@@ -81,6 +81,9 @@
         --purple-rgb: 139, 92, 246;
         /* --primary の 30% 透明度バリアント（--shadow-glow のグロー演出で使用） */
         --primary-30: rgba(var(--primary-rgb), 0.3);
+        /* .skill-icon.purple と .contact-icon のアイコン背景で共用するグラデーション
+           （2箇所で完全一致していたため一元管理化。.cert-icon は透明度が異なる別配色のため対象外） */
+        --icon-gradient-primary-purple: linear-gradient(135deg, rgba(var(--primary-rgb), 0.2), rgba(var(--purple-rgb), 0.2));
         --accent: #22d3ee;
         /* --accent の RGB 3値 */
         --accent-rgb: 34, 211, 238;
@@ -682,7 +685,12 @@
         gap: 2rem;
       }
 
-      .skill-card {
+      /* .skill-card と .work-card はカード共通の見た目（背景・角丸・ホバー時のグロー演出）を
+         共有するため、セレクタをカンマ区切りで束ねて一元管理する（従来は約20行が2箇所に
+         コピペされていた）。.work-card 固有のレイアウト差分（flex 化・featured バリアント）は
+         この下の .work-card ブロックに残す */
+      .skill-card,
+      .work-card {
         background: var(--bg-card);
         border-radius: 20px;
         padding: 2rem;
@@ -692,7 +700,8 @@
         overflow: hidden;
       }
 
-      .skill-card::before {
+      .skill-card::before,
+      .work-card::before {
         content: "";
         position: absolute;
         top: 0;
@@ -704,13 +713,15 @@
         transition: transform 0.4s ease;
       }
 
-      .skill-card:hover {
+      .skill-card:hover,
+      .work-card:hover {
         transform: translateY(-8px);
         border-color: var(--primary-30);
         box-shadow: var(--shadow-glow);
       }
 
-      .skill-card:hover::before {
+      .skill-card:hover::before,
+      .work-card:hover::before {
         transform: scaleX(1);
       }
 
@@ -726,7 +737,7 @@
       }
 
       .skill-icon.purple {
-        background: linear-gradient(135deg, rgba(var(--primary-rgb), 0.2), rgba(var(--purple-rgb), 0.2));
+        background: var(--icon-gradient-primary-purple);
       }
       .skill-icon.cyan {
         background: linear-gradient(135deg, rgba(var(--cyan-rgb), 0.2), rgba(var(--accent-rgb), 0.2));
@@ -1026,7 +1037,7 @@
         justify-content: center;
         font-size: 2rem;
         margin-bottom: 1.5rem;
-        background: linear-gradient(135deg, rgba(var(--primary-rgb), 0.2), rgba(var(--purple-rgb), 0.2));
+        background: var(--icon-gradient-primary-purple);
         transition: all 0.3s ease;
       }
 
@@ -1185,41 +1196,14 @@
         gap: 2rem;
       }
 
+      /* 共通のカード見た目は .skill-card と束ねた上のブロックが担う。ここには
+         .work-card 固有のレイアウト差分のみを残す */
       .work-card {
         display: flex;
         flex-direction: column;
-        background: var(--bg-card);
-        border-radius: 20px;
-        padding: 2rem;
-        border: 1px solid var(--border);
-        transition: all 0.4s ease;
-        position: relative;
-        overflow: hidden;
-      }
-
-      .work-card::before {
-        content: "";
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        height: 4px;
-        background: var(--gradient-1);
-        transform: scaleX(0);
-        transition: transform 0.4s ease;
       }
 
       .work-card.featured::before {
-        transform: scaleX(1);
-      }
-
-      .work-card:hover {
-        transform: translateY(-8px);
-        border-color: var(--primary-30);
-        box-shadow: var(--shadow-glow);
-      }
-
-      .work-card:hover::before {
         transform: scaleX(1);
       }
 
@@ -1771,7 +1755,7 @@
             <div class="cert-card">
               <div class="cert-icon" aria-hidden="true">🏆</div>
               <div class="cert-info">
-                <h3>PL-500: Microsoft Power Automate RPA Developer</h3>
+                <h3>PL-500: Microsoft Power Automate RPA Developer Associate</h3>
                 <div class="cert-org">Microsoft</div>
                 <div class="cert-date">2025年12月23日取得</div>
               </div>

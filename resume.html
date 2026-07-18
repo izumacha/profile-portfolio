@@ -375,7 +375,11 @@
     @media (prefers-reduced-motion: reduce) {
       /* .link-item は hover 時に transform: translateY(-2px) を持つため、
          transition を止めて滑らかな移動アニメーションを抑制する */
-      .link-item {
+      .link-item,
+      /* .cert-link は transform を伴わない純粋な背景/文字色フェードのみだが、
+         index.html 側の同名クラスと同様に抑制対象へ含める（hover 時に
+         background/color が transition: all 0.2s でフェードするため） */
+      .cert-link {
         transition: none;
       }
     }
@@ -550,7 +554,7 @@
         </div>
         <div class="cert-item">
           <div class="cert-info">
-            <h3>ITILファンデーション</h3>
+            <h3>ITIL Foundation</h3>
             <div class="cert-date">2024年10月4日取得</div>
           </div>
           <a href="https://candidate.peoplecert.org/ReportsLink.aspx?argType=1&id=A6FBB9B23BEA93BCF93E7A8638F3771026E6D726EB4CE63D6C33A78EEFD522E0259D5F2834214B41815622B1F44F9B74" class="cert-link" target="_blank" rel="noopener noreferrer">証明書</a>
@@ -595,7 +599,7 @@
         </div>
         <div class="timeline-item">
           <div class="timeline-date">2024年10月</div>
-          <h3 class="timeline-title">ITILファンデーション取得</h3>
+          <h3 class="timeline-title">ITIL Foundation 取得</h3>
           <div class="timeline-org">PeopleCert</div>
           <div class="timeline-desc">
             ITサービスマネジメントのベストプラクティスを学習し、認定資格を取得しました。

@@ -1408,7 +1408,17 @@
         /* ハンバーガーメニューの3本線(.nav-toggle__bar)がメニュー開閉時に回転・フェードして
            ×字に変形する動き（.nav-toggle--open 付与時）も抑制する。968px以下でのみ表示される
            ボタンだが、他の抑制対象と同じくソース末尾のこのブロックにまとめて置く */
-        .nav-toggle__bar {
+        .nav-toggle__bar,
+        /* 以下は transform を伴わない純粋な色/背景フェードのみを持つ要素。他のカード/ボタン群と
+           同様の transition: all|color 0.3s ease を持つため、抑制対象の抜け漏れとして追加する:
+           .nav はスクロール時の背景クロスフェード（.nav--scrolled 付与時）、.nav-links a は
+           ホバー時の文字色変化、.btn-secondary は共通 .btn の transition を継承したホバー時の
+           枠線色/背景変化、.cert-link と .work-repo はそれぞれホバー時の背景/文字色変化を持つ */
+        .nav,
+        .nav-links a,
+        .btn-secondary,
+        .cert-link,
+        .work-repo {
           transition: none;
         }
       }

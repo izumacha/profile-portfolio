@@ -375,7 +375,11 @@
     @media (prefers-reduced-motion: reduce) {
       /* .link-item は hover 時に transform: translateY(-2px) を持つため、
          transition を止めて滑らかな移動アニメーションを抑制する */
-      .link-item {
+      .link-item,
+      /* .cert-link は transform を伴わない純粋な背景/文字色フェードのみだが、
+         index.html 側の同名クラスと同様に抑制対象へ含める（hover 時に
+         background/color が transition: all 0.2s でフェードするため） */
+      .cert-link {
         transition: none;
       }
     }

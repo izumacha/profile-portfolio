@@ -105,7 +105,7 @@
            満たさないため 0.65 に引き上げ済み(§7 a11y)。カード背景との合成後コントラスト比は
            約3.32:1 */
         --border: rgba(148, 163, 184, 0.65);
-        /* --text-muted の 15% 透明度バリアント（.work-badge.sub の背景色で使用） */
+        /* --text-muted の 15% 透明度バリアント（.work-badge--sub の背景色で使用） */
         --muted-15: rgba(148, 163, 184, 0.15);
         --gradient-1: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #d946ef 100%);
         /* 白文字を上に重ねるボタン/バッジ専用の高コントラスト版。--gradient-1 は末尾の
@@ -1227,7 +1227,7 @@
         color: var(--text-primary);
       }
 
-      .work-badge.sub {
+      .work-badge--sub {
         /* --muted-15 を参照して一元管理（直書き禁止ルールに準拠） */
         background: var(--muted-15);
         color: var(--text-muted);
@@ -1703,7 +1703,7 @@
             <div class="works-container">
               <article class="work-card">
                 <div class="work-card-head">
-                  <span class="work-badge sub">補助</span>
+                  <span class="work-badge--sub">補助</span>
                   <a
                     href="https://github.com/izumacha/batch-scheduler"
                     class="work-repo"
@@ -1726,7 +1726,7 @@
 
               <article class="work-card">
                 <div class="work-card-head">
-                  <span class="work-badge sub">補助</span>
+                  <span class="work-badge--sub">補助</span>
                   <a
                     href="https://github.com/izumacha/my-task-manager"
                     class="work-repo"

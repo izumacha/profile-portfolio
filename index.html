@@ -1418,7 +1418,13 @@
         .nav-links a,
         .btn-secondary,
         .cert-link,
-        .work-repo {
+        .work-repo,
+        /* スキップリンクはキーボードフォーカス時に transition: top 0.2s ease で
+           画面外(top: -100%)から画面内(top: 0)へ滑り込む。この抑制ブロックの
+           他セレクタと同じ transition: all|color|top 0.3s系の抑制漏れとして
+           見落とされていたため追加する（キーボード操作者がTabで最初に触れる
+           要素であり、モーション低減設定時こそ抑制すべき対象） */
+        .skip-link {
           transition: none;
         }
       }

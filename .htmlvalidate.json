@@ -5,7 +5,7 @@
     "^node_modules/": "off"
   },
   "rules": {
-    "void-style": "off"
+    "void-style": ["error", { "style": "selfclose" }]
   }
 }
 

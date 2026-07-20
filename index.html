@@ -687,7 +687,7 @@
 
       /* .skill-card と .work-card はカード共通の見た目（背景・角丸・ホバー時のグロー演出）を
          共有するため、セレクタをカンマ区切りで束ねて一元管理する（従来は約20行が2箇所に
-         コピペされていた）。.work-card 固有のレイアウト差分（flex 化・featured バリアント）は
+         コピペされていた）。.work-card 固有のレイアウト差分（flex 化・--featured モディファイア）は
          この下の .work-card ブロックに残す */
       .skill-card,
       .work-card {
@@ -1203,7 +1203,7 @@
         flex-direction: column;
       }
 
-      .work-card.featured::before {
+      .work-card--featured::before {
         transform: scaleX(1);
       }
 
@@ -1621,7 +1621,7 @@
               <span class="works-group-note">― 力を入れて開発している代表作</span>
             </h3>
             <div class="works-container">
-              <article class="work-card featured" data-repo-key="helpdesk-hub">
+              <article class="work-card work-card--featured" data-repo-key="helpdesk-hub">
                 <div class="work-card-head">
                   <span class="work-badge">主力</span>
                   <a
@@ -1646,7 +1646,7 @@
                 </div>
               </article>
 
-              <article class="work-card featured" data-repo-key="incident-insight">
+              <article class="work-card work-card--featured" data-repo-key="incident-insight">
                 <div class="work-card-head">
                   <span class="work-badge">主力</span>
                   <a
@@ -1670,7 +1670,7 @@
                 </div>
               </article>
 
-              <article class="work-card featured" data-repo-key="AI-Docker-Environment">
+              <article class="work-card work-card--featured" data-repo-key="AI-Docker-Environment">
                 <div class="work-card-head">
                   <span class="work-badge">主力</span>
                   <a

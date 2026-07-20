@@ -5,12 +5,7 @@
     "^node_modules/": "off"
   },
   "rules": {
-    "void-style": "off",
-    "no-raw-characters": "off",
-    "no-inline-style": "off",
-    "no-implicit-close": "off",
-    "prefer-native-element": "off",
-    "wcag/h63": "off"
+    "void-style": "off"
   }
 }
 

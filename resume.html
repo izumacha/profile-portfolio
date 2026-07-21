@@ -391,6 +391,13 @@
         print-color-adjust: exact;
       }
 
+      .no-print {
+        /* /code-review ultra 指摘対応: 「ポートフォリオへ戻る」リンクは画面遷移専用の
+           ナビゲーション要素で、紙面では機能しない（.print-url と違い URL を併記する
+           対象でもない）ため、印刷時は非表示にする */
+        display: none;
+      }
+
       .timeline-item,
       .project-item,
       .cert-item {
@@ -420,7 +427,7 @@
       <h1 class="name">泉将貴</h1>
       <p class="title">フルスタックエンジニア志望</p>
       <div class="contact-info">
-        <div class="contact-item">
+        <div class="contact-item no-print">
           <span aria-hidden="true">←</span>
           <a href="index.html">ポートフォリオへ戻る</a>
         </div>

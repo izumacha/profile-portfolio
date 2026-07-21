@@ -72,7 +72,11 @@
     }
     
     .name {
-      font-size: 2.5rem;
+      /* CLAUDE.md §3: フォントは clamp() で流体タイポグラフィを適用する（index.html の
+         .hero-name/.section-title と同じ方針）。768px 用の固定値オーバーライドは撤去した。
+         5vw は 640px 前後で下限 2rem に、800px 前後で上限 2.5rem に達し、旧来の
+         「768px 以下は 2rem 固定」という段階切り替えに近い範囲を滑らかな曲線で再現する */
+      font-size: clamp(2rem, 5vw, 2.5rem);
       font-weight: 700;
       color: var(--text);
       margin-bottom: 8px;
@@ -348,11 +352,7 @@
       .container {
         padding: 20px 15px;
       }
-      
-      .name {
-        font-size: 2rem;
-      }
-      
+
       .contact-info {
         gap: 15px;
       }
@@ -420,6 +420,10 @@
       <h1 class="name">泉将貴</h1>
       <p class="title">フルスタックエンジニア志望</p>
       <div class="contact-info">
+        <div class="contact-item">
+          <span aria-hidden="true">←</span>
+          <a href="index.html">ポートフォリオへ戻る</a>
+        </div>
         <div class="contact-item">
           <span aria-hidden="true">📧</span>
           <a href="mailto:izumacha.1010@gmail.com">izumacha.1010@gmail.com</a>

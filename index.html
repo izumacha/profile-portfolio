@@ -338,7 +338,7 @@
         outline-offset: 2px;
       }
 
-      .nav-toggle__bar {
+      .nav-toggle-bar {
         display: block;
         width: 100%;
         height: 2px;
@@ -348,15 +348,15 @@
       }
 
       /* メニュー展開中はハンバーガーの3本線を×字に変形させる（JSが nav-toggle--open クラスを付与） */
-      .nav-toggle--open .nav-toggle__bar:nth-child(1) {
+      .nav-toggle--open .nav-toggle-bar:nth-child(1) {
         transform: translateY(7px) rotate(45deg);
       }
 
-      .nav-toggle--open .nav-toggle__bar:nth-child(2) {
+      .nav-toggle--open .nav-toggle-bar:nth-child(2) {
         opacity: 0;
       }
 
-      .nav-toggle--open .nav-toggle__bar:nth-child(3) {
+      .nav-toggle--open .nav-toggle-bar:nth-child(3) {
         transform: translateY(-7px) rotate(-45deg);
       }
 
@@ -783,17 +783,26 @@
         gap: 1.5rem;
       }
 
-      .cert-card {
-        display: flex;
-        align-items: center;
-        gap: 1.5rem;
+      /* .cert-card と .contact-card はカード共通の見た目（背景・角丸20px・枠線・
+         transition 0.4s・position/overflow）を共有するため、.skill-card/.work-card と
+         同様にセレクタをカンマ区切りで束ねて一元管理する（CLAUDE.md §6 DRY。
+         .stat-item は border-radius(16px)/transition(0.3s) の値自体が異なるため、
+         見た目を変えずには統合できず対象外とする） */
+      .cert-card,
+      .contact-card {
         background: var(--bg-card);
         border-radius: 20px;
-        padding: 1.5rem 2rem;
         border: 1px solid var(--border);
         transition: all 0.4s ease;
         position: relative;
         overflow: hidden;
+      }
+
+      .cert-card {
+        display: flex;
+        align-items: center;
+        gap: 1.5rem;
+        padding: 1.5rem 2rem;
       }
 
       .cert-card::before {
@@ -994,13 +1003,7 @@
         align-items: center;
         text-align: center;
         padding: 2.5rem 2rem;
-        background: var(--bg-card);
-        border-radius: 20px;
-        border: 1px solid var(--border);
         text-decoration: none;
-        transition: all 0.4s ease;
-        position: relative;
-        overflow: hidden;
       }
 
       .contact-card::before {
@@ -1407,10 +1410,10 @@
         .timeline-content,
         /* ナビリンクのアンダーライン(::after)がホバーで width: 0 → 100% に伸びる動きも抑制する */
         .nav-links a::after,
-        /* ハンバーガーメニューの3本線(.nav-toggle__bar)がメニュー開閉時に回転・フェードして
+        /* ハンバーガーメニューの3本線(.nav-toggle-bar)がメニュー開閉時に回転・フェードして
            ×字に変形する動き（.nav-toggle--open 付与時）も抑制する。968px以下でのみ表示される
            ボタンだが、他の抑制対象と同じくソース末尾のこのブロックにまとめて置く */
-        .nav-toggle__bar,
+        .nav-toggle-bar,
         /* 以下は transform を伴わない純粋な色/背景フェードのみを持つ要素。他のカード/ボタン群と
            同様の transition: all|color 0.3s ease を持つため、抑制対象の抜け漏れとして追加する:
            .nav はスクロール時の背景クロスフェード（.nav--scrolled 付与時）、.nav-links a は
@@ -1452,9 +1455,9 @@
           aria-expanded="false"
           aria-controls="nav-links"
         >
-          <span class="nav-toggle__bar"></span>
-          <span class="nav-toggle__bar"></span>
-          <span class="nav-toggle__bar"></span>
+          <span class="nav-toggle-bar"></span>
+          <span class="nav-toggle-bar"></span>
+          <span class="nav-toggle-bar"></span>
         </button>
         <ul class="nav-links" id="nav-links">
           <li><a href="#about">About</a></li>

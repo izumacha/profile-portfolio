@@ -2,6 +2,13 @@
 
 個人プロフィールページのポートフォリオサイトです。
 
+## デモ
+
+**公開デモ URL（GitHub Pages）**: https://izumacha.github.io/profile-portfolio/
+
+- プロフィールページ（ダークテーマ）: [index.html](https://izumacha.github.io/profile-portfolio/)
+- 職務経歴書（ライトテーマ・印刷対応）: [resume.html](https://izumacha.github.io/profile-portfolio/resume.html)
+
 ## 特徴
 
 - レスポンシブデザイン

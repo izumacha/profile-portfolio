@@ -1,13 +1,13 @@
 {
-  "generated_at": "2026-07-23T21:55:21.496Z",
+  "generated_at": "2026-07-24T21:54:16.443Z",
   "repos": [
     {
       "key": "helpdesk-hub",
       "name": "HelpDesk Hub",
       "url": "https://github.com/izumacha/helpdesk-hub",
       "ci": {
-        "status": "success",
-        "run_url": "https://github.com/izumacha/helpdesk-hub/actions/runs/29920348789",
+        "status": "none",
+        "run_url": "",
         "branch": "main"
       },
       "last_commit": {
@@ -81,9 +81,9 @@
         "branch": "main"
       },
       "last_commit": {
-        "iso": "2026-07-22T21:55:05Z",
-        "sha7": "98dc44b",
-        "url": "https://github.com/izumacha/profile-portfolio/commit/98dc44b5aaf405615707451ba90badd94e802cfd"
+        "iso": "2026-07-23T21:55:21Z",
+        "sha7": "4515157",
+        "url": "https://github.com/izumacha/profile-portfolio/commit/451515773cdf6b4bfbc099a8091046538ec8dcab"
       },
       "languages": [
         "HTML",

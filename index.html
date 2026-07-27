@@ -683,7 +683,10 @@
       /* Skills Section */
       .skills-container {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        /* minmax の最小値を min(300px, 100%) にする。裸の 300px だと、幅 320px 前後の
+           狭い端末（内容領域が約 272px）でトラックがビューポートを超え、overflow-x:hidden
+           によってカード右端が見切れる。100% を上限に噛ませて狭幅でも収まるようにする。 */
+        grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr));
         gap: 2rem;
       }
 
@@ -1197,7 +1200,9 @@
 
       .works-container {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        /* .skills-container と同じ理由で最小値を min(300px, 100%) にし、狭幅端末での
+           カード右端の見切れ（横幅超過）を防ぐ。 */
+        grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr));
         gap: 2rem;
       }
 

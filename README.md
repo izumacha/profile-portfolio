@@ -19,9 +19,9 @@
 |---|---|
 | ![メインページのファーストビュー。ダークテーマの背景にプロフィール画像・氏名・肩書き・紹介文が中央揃えで表示されている](docs/screenshots/index-hero-dark.png) | ![スキルセットのセクション。プログラミング言語 / 自動化・RPA / ツールの 3 枚のカードに習得技術がタグで並んでいる](docs/screenshots/index-sections-dark.png) |
 
-| 職務経歴書（ライトテーマ） | モバイル表示（768px） |
+| 職務経歴書（ライトテーマ・ページ全体） | モバイル表示（768px） |
 |---|---|
-| ![職務経歴書ページ全体。ライトテーマで自己紹介・スキル・代表プロジェクト・資格認定・学習履歴が縦に並ぶ印刷対応レイアウト](docs/screenshots/resume-light.png) | ![768px 幅で表示したメインページのファーストビュー。ナビゲーションとコンテンツが縦 1 列に収まっている](docs/screenshots/index-mobile-768.png) |
+| <img src="docs/screenshots/resume-light.png" alt="職務経歴書ページ全体。ライトテーマで自己紹介・スキル・代表プロジェクト・資格認定・学習履歴が縦に並ぶ印刷対応レイアウト" width="300"> | <img src="docs/screenshots/index-mobile-768.png" alt="768px 幅で表示したメインページのファーストビュー。ナビゲーションとコンテンツが縦 1 列に収まっている" width="300"> |
 
 > スクリーンショットとデモ GIF は `npm run capture:screenshots` で自動撮影しています（[使用方法](#使用方法)を参照）。
 

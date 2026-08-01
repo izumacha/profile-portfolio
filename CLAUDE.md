@@ -32,6 +32,15 @@ npm run test:lighthouse                          # Lighthouse CI（lhci autorun�
 npx playwright test --update-snapshots           # 意図的な見た目変更時にスナップショット更新
 ```
 
+README 掲載用のスクリーンショット・デモ GIF（`docs/screenshots/`）は自動撮影スクリプトで再生成する（§15）。
+
+```bash
+npm run capture:screenshots                      # 静止画 4 枚 + デモ GIF 1 本を再生成
+```
+
+GIF 化に `ffmpeg` を使うため事前にインストールしておく。ブラウザをダウンロードできない環境では
+`CAPTURE_CHROMIUM_EXECUTABLE=/path/to/chromium` で既存の Chromium 実行ファイルを指定できる。
+
 ## 3. アーキテクチャ
 
 ### ファイル構成
@@ -42,6 +51,10 @@ npx playwright test --update-snapshots           # 意図的な見た目変更�
 | `resume.html` | 履歴書ページ（ライトテーマ、印刷対応） |
 | `avatar.jpg` | プロフィール画像 |
 | `*.pdf` | 資格証明書 |
+| `scripts/capture-screenshots.mjs` | README 掲載用スクショ・デモ GIF の自動撮影スクリプト（§15） |
+| `scripts/lib/scroll-priming.mjs` | スクロール連動アニメーションを事前発火させる共有ヘルパー（撮影と E2E で共用） |
+| `scripts/lib/static-server.mjs` | 撮影時に `data/portfolio.json` を fetch できるようにするローカル静的サーバー |
+| `docs/screenshots/` | README 掲載用のスクリーンショットとデモ GIF（自動生成物） |
 
 ### デザイン規約（§6 の一元管理を具体化）
 

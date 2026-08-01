@@ -3,7 +3,8 @@
   "private": true,
   "scripts": {
     "test:lighthouse": "lhci autorun",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "capture:screenshots": "node scripts/capture-screenshots.mjs"
   },
   "devDependencies": {
     "@lhci/cli": "^0.15.1",

@@ -105,6 +105,15 @@ export async function startStaticServer(rootDir, port) {
     // ページを開くときのベース URL
     origin: `http://127.0.0.1:${port}`,
     // 撮影完了後にサーバーを閉じるための関数（クローズ完了まで待つ）
-    close: () => new Promise((resolveClose) => server.close(() => resolveClose())),
+    close: () =>
+      new Promise((resolveClose) => {
+        // close() は「新規接続の受付停止」だけで、確立済みの keep-alive 接続が残っていると
+        // 完了コールバックが呼ばれない。ブラウザの後始末が異常終了して接続が残ったままだと
+        // この Promise が永久に解決せず、待ち受けハンドルがイベントループを掴んだままプロセスが
+        // ハングする。残存接続を明示的に切ってから閉じ、停止を確実に完了させる（§8）
+        server.closeAllConnections();
+        // 受付停止と残存接続の後始末が終わったら Promise を解決する
+        server.close(() => resolveClose());
+      }),
   };
 }

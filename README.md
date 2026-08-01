@@ -9,6 +9,22 @@
 - プロフィールページ（ダークテーマ）: [index.html](https://izumacha.github.io/profile-portfolio/)
 - 職務経歴書（ライトテーマ・印刷対応）: [resume.html](https://izumacha.github.io/profile-portfolio/resume.html)
 
+![ナビゲーションの各セクション（About / Skills / Works / Timeline / Contact）へ順に移動し、スクロールに連動してカードがフェードインする操作デモ](docs/screenshots/portfolio-nav.gif)
+
+*デモ — ナビゲーションからのセクション遷移とスクロール連動アニメーション*
+
+### 主要画面
+
+| プロフィール（ファーストビュー） | スキルセット |
+|---|---|
+| ![メインページのファーストビュー。ダークテーマの背景にプロフィール画像・氏名・肩書き・紹介文が中央揃えで表示されている](docs/screenshots/index-hero-dark.png) | ![スキルセットのセクション。プログラミング言語 / 自動化・RPA / ツールの 3 枚のカードに習得技術がタグで並んでいる](docs/screenshots/index-sections-dark.png) |
+
+| 職務経歴書（ライトテーマ） | モバイル表示（768px） |
+|---|---|
+| ![職務経歴書ページ全体。ライトテーマで自己紹介・スキル・代表プロジェクト・資格認定・学習履歴が縦に並ぶ印刷対応レイアウト](docs/screenshots/resume-light.png) | ![768px 幅で表示したメインページのファーストビュー。ナビゲーションとコンテンツが縦 1 列に収まっている](docs/screenshots/index-mobile-768.png) |
+
+> スクリーンショットとデモ GIF は `npm run capture:screenshots` で自動撮影しています（[使用方法](#使用方法)を参照）。
+
 ## 特徴
 
 - レスポンシブデザイン
@@ -53,6 +69,17 @@ python -m http.server 8000
 # Node.jsの場合（http-serverがインストールされている場合）
 npx http-server
 ```
+
+3. README 掲載用のスクリーンショット・デモ GIF を撮り直す場合：
+
+```bash
+npm ci                                      # 依存インストール（決定的）
+npx playwright install --with-deps chromium # 初回のみ: 撮影用ブラウザ
+npm run capture:screenshots                 # docs/screenshots/ を再生成（ffmpeg が必要）
+```
+
+GIF の生成に `ffmpeg` を使うため、事前にインストールしてください（例: `apt-get install ffmpeg` / `brew install ffmpeg`）。
+ブラウザをダウンロードできない環境では、`CAPTURE_CHROMIUM_EXECUTABLE` に既存の Chromium 実行ファイルのパスを指定すると、そちらを使い回せます。
 
 ## カスタマイズ
 

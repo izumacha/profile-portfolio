@@ -48,10 +48,17 @@ const MOBILE_WIDTH = 768;
 // モバイル撮影時のビューポート高さ（縦長の一般的なタブレット/大型スマホ相当）
 const MOBILE_HEIGHT = 1024;
 
+// 「主要セクション」の静止画で先頭に合わせる要素のセレクタ。
+// ナビゲーションの移動先と同じ id を指す（index.html 側の id を変えたらここも更新する）
+const SECTIONS_SHOT_SELECTOR = "#skills";
+
 // GIF に収めるナビゲーション遷移の対象セクション（README のデモで見せたい順に並べる）
 const GIF_SECTIONS = ["about", "skills", "works", "timeline", "contact"];
 // 1 セクションあたりに撮るフレーム数（スムーススクロールの途中経過を数コマ残す）
 const GIF_FRAMES_PER_SECTION = 6;
+// GIF の冒頭に入れる静止コマ数。再生開始直後に「どのページか」を認識できるよう、
+// 動き出す前のファーストビューを数コマ止めて見せる
+const GIF_INTRO_FRAMES = 3;
 // フレーム 1 枚あたりの待機時間（ミリ秒）。GIF の再生速度（= 1000/この値 fps）と対応する
 const GIF_FRAME_INTERVAL_MS = 125;
 // GIF の出力幅（ピクセル）。10MB 以下に収めるため原寸 1280px から縮小する（§15 / §8）
@@ -97,47 +104,80 @@ function run(command, args) {
  * @returns {Promise<void>} 4 枚の書き出しが完了したら解決する Promise
  */
 async function captureStills(browser, origin) {
+  // デスクトップ幅の 3 枚を撮る
+  await captureDesktopStills(browser, origin);
+  // モバイル幅の 1 枚を撮る
+  await captureMobileStill(browser, origin);
+}
+
+/**
+ * デスクトップ幅（1280px）の静止画 3 枚を撮影する。
+ *
+ * @param {import('@playwright/test').Browser} browser 起動済みの Chromium
+ * @param {string} origin 撮影対象を配信しているローカルサーバーの URL
+ * @returns {Promise<void>} 3 枚の書き出しが完了したら解決する Promise
+ */
+async function captureDesktopStills(browser, origin) {
   // デスクトップ幅のページを開く（ダークテーマのメインページ用）
-  const desktop = await browser.newPage({
+  const page = await browser.newPage({
     viewport: { width: DESKTOP_WIDTH, height: DESKTOP_HEIGHT },
   });
 
-  // メインページを開き、ネットワークが落ち着く（portfolio.json の取得完了）まで待つ
-  await desktop.goto(`${origin}/index.html`, { waitUntil: "networkidle" });
-  // スクロール連動アニメーションを一巡させてから先頭に戻す（透明のまま撮らないため）
-  await primeScrollAnimations(desktop);
-  // 1 枚目: ファーストビュー（ページ先頭のヒーロー領域）を撮る
-  await desktop.screenshot({ path: join(outputDir, "index-hero-dark.png") });
+  try {
+    // メインページを開き、ネットワークが落ち着く（portfolio.json の取得完了）まで待つ
+    await page.goto(`${origin}/index.html`, { waitUntil: "networkidle" });
+    // スクロール連動アニメーションを一巡させてから先頭に戻す（透明のまま撮らないため）
+    await primeScrollAnimations(page);
+    // 1 枚目: ファーストビュー（ページ先頭のヒーロー領域）を撮る
+    await page.screenshot({ path: join(outputDir, "index-hero-dark.png") });
 
-  // 2 枚目の準備: 主要セクション（スキル）の先頭までスクロールする
-  await desktop.evaluate(() => {
-    // ナビゲーションと同じ移動先である #skills 要素を取得する
-    const target = document.querySelector("#skills");
-    // 見つかった場合のみ、アニメーションを挟まず即座にその位置へ移動する
-    if (target) target.scrollIntoView({ behavior: "instant", block: "start" });
-  });
-  // 2 枚目: スキル / タイムライン等の主要セクションを撮る
-  await desktop.screenshot({ path: join(outputDir, "index-sections-dark.png") });
+    // 2 枚目の準備: 主要セクションの先頭までスクロールする。
+    // セレクタが見つからない場合はここで例外にして撮影を止める。黙って読み飛ばすと
+    // ヒーローと同じ絵が「主要セクション」の名前で保存され、セクションの id が
+    // 変わったことに誰も気づけないまま誤ったスクショが README に載ってしまう（§6）
+    await page.waitForSelector(SECTIONS_SHOT_SELECTOR, { state: "attached" });
+    // 見つかった要素の先頭位置へ、アニメーションを挟まず即座に移動する
+    await page.evaluate((selector) => {
+      // 上の waitForSelector で存在は保証済みなのでそのまま参照してよい
+      document.querySelector(selector).scrollIntoView({ behavior: "instant", block: "start" });
+    }, SECTIONS_SHOT_SELECTOR);
+    // 2 枚目: スキル / タイムライン等の主要セクションを撮る
+    await page.screenshot({ path: join(outputDir, "index-sections-dark.png") });
 
-  // 3 枚目: 履歴書ページ（ライトテーマ・印刷対応）をページ全体で撮る
-  await desktop.goto(`${origin}/resume.html`, { waitUntil: "networkidle" });
-  // 履歴書は 1 枚の書類として見せたいので fullPage で縦に全部収める
-  await desktop.screenshot({ path: join(outputDir, "resume-light.png"), fullPage: true });
-  // デスクトップ用ページはここで閉じる（リソースを確実に解放する §8）
-  await desktop.close();
+    // 3 枚目: 履歴書ページ（ライトテーマ・印刷対応）を開く
+    await page.goto(`${origin}/resume.html`, { waitUntil: "networkidle" });
+    // 履歴書は 1 枚の書類として見せたいので fullPage で縦に全部収める
+    await page.screenshot({ path: join(outputDir, "resume-light.png"), fullPage: true });
+  } finally {
+    // 成功・失敗にかかわらずページを閉じる（§8 リソースを確実に解放する）
+    await page.close();
+  }
+}
 
-  // 4 枚目: 768px 幅のモバイル表示を撮るための別ページを開く
-  const mobile = await browser.newPage({
+/**
+ * モバイル幅（768px）の静止画 1 枚を撮影する。
+ *
+ * @param {import('@playwright/test').Browser} browser 起動済みの Chromium
+ * @param {string} origin 撮影対象を配信しているローカルサーバーの URL
+ * @returns {Promise<void>} 1 枚の書き出しが完了したら解決する Promise
+ */
+async function captureMobileStill(browser, origin) {
+  // 768px 幅のモバイル表示を撮るためのページを開く
+  const page = await browser.newPage({
     viewport: { width: MOBILE_WIDTH, height: MOBILE_HEIGHT },
   });
-  // モバイル幅でメインページを開く
-  await mobile.goto(`${origin}/index.html`, { waitUntil: "networkidle" });
-  // モバイル幅でもアニメーションを発火させてから先頭に戻す
-  await primeScrollAnimations(mobile);
-  // 4 枚目: モバイル幅のファーストビューを撮る
-  await mobile.screenshot({ path: join(outputDir, "index-mobile-768.png") });
-  // モバイル用ページを閉じる
-  await mobile.close();
+
+  try {
+    // モバイル幅でメインページを開く
+    await page.goto(`${origin}/index.html`, { waitUntil: "networkidle" });
+    // モバイル幅でもアニメーションを発火させてから先頭に戻す
+    await primeScrollAnimations(page);
+    // モバイル幅のファーストビューを撮る
+    await page.screenshot({ path: join(outputDir, "index-mobile-768.png") });
+  } finally {
+    // 成功・失敗にかかわらずページを閉じる（§8 リソースを確実に解放する）
+    await page.close();
+  }
 }
 
 /**
@@ -181,7 +221,7 @@ async function captureNavigationGif(browser, origin) {
     };
 
     // 冒頭にファーストビューの静止コマを数枚入れて「どのページか」を分かるようにする
-    for (let i = 0; i < GIF_FRAMES_PER_SECTION / 2; i += 1) await captureFrame();
+    for (let i = 0; i < GIF_INTRO_FRAMES; i += 1) await captureFrame();
 
     // 各セクションへナビゲーションリンクで移動しながらコマを撮っていく
     for (const sectionId of GIF_SECTIONS) {
@@ -198,6 +238,8 @@ async function captureNavigationGif(browser, origin) {
     // 大きく破綻するため、palettegen で内容に合わせたパレットを作ってから paletteuse で適用する
     await run("ffmpeg", [
       "-y", // 既存ファイルを確認なしで上書きする
+      "-loglevel", "error", // バナーやパレット生成の情報ログを抑え、本当のエラーだけを残す
+      "-nostdin", // 標準入力を読みに行かせない（スクリプト実行中に端末を奪われないようにする）
       "-framerate", String(GIF_FRAMERATE), // 入力コマ画像の再生速度（撮影間隔と一致させる）
       "-i", join(framesDir, "frame-%04d.png"), // 連番のコマ画像を入力にする
       "-filter_complex", // 縮小 → パレット生成 → パレット適用を 1 つのフィルタグラフで行う

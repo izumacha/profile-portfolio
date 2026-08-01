@@ -92,6 +92,14 @@ export async function startStaticServer(rootDir, port) {
     server.listen(port, "127.0.0.1", () => resolveListen());
   });
 
+  // 起動後のエラーは上の once ハンドラでは拾えない（初回で消費済み）。ハンドラが無いと
+  // 'error' イベントは Node の既定動作で例外になり、撮影中の原因不明なクラッシュに見える。
+  // 握り潰さずに文脈付きでログへ残し、撮影の失敗として追跡できるようにする（§6）
+  server.on("error", (err) => {
+    // どのサーバーで何が起きたかが分かる形でエラー内容を標準エラーへ出す
+    console.error("[capture] 撮影用ローカルサーバーでエラーが発生しました:", err);
+  });
+
   // 撮影スクリプトから使う「配信元 URL」と「停止関数」を返す
   return {
     // ページを開くときのベース URL

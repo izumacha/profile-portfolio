@@ -105,6 +105,22 @@ export async function startStaticServer(rootDir, port) {
     // ページを開くときのベース URL
     origin: `http://127.0.0.1:${port}`,
     // 撮影完了後にサーバーを閉じるための関数（クローズ完了まで待つ）
-    close: () => new Promise((resolveClose) => server.close(() => resolveClose())),
+    close: () =>
+      new Promise((resolveClose) => {
+        // close() は「新規接続の受付停止」であり、完了コールバックは全接続が終わるまで呼ばれない。
+        // アイドル状態の keep-alive 接続は Node 19 以降なら close() 自身が切ってくれるが、
+        // 応答途中（in-flight）の接続が残っている場合は待ち続ける。撮影が異常終了してブラウザの
+        // 後始末が中途半端になるとこの状態になり得て、その場合この Promise は解決せず、
+        // 待ち受けハンドルがイベントループを掴んだままプロセスがハングする。
+        // 残存接続を明示的に破棄して停止を確実に完了させる多層防御（§8）。
+        //
+        // 呼ぶ順番は close() → closeAllConnections() の順にする（Node ドキュメントの推奨順）。
+        // 逆順にすると、接続を切ってから受付を止めるまでの間に新しい接続が来た場合、その接続が
+        // 切られずに残って close() の完了コールバックが再び呼ばれなくなる。先に受付を止めておけば
+        // 「切ったあとに増える」ことが原理的に起こらない
+        server.close(() => resolveClose());
+        // 受付停止後に残っている確立済み接続を破棄し、完了コールバックへ到達させる
+        server.closeAllConnections();
+      }),
   };
 }

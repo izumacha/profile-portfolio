@@ -191,68 +191,76 @@ async function captureMobileStill(browser, origin) {
 async function captureNavigationGif(browser, origin) {
   // コマ画像を貯めるための一時ディレクトリを作る（リポジトリを汚さない）
   const framesDir = await mkdtemp(join(tmpdir(), "portfolio-gif-"));
-  // GIF 用のページを開く（静止画と同じデスクトップ幅で撮る）
-  const page = await browser.newPage({
-    viewport: { width: DESKTOP_WIDTH, height: DESKTOP_HEIGHT },
-  });
 
+  // 一時ディレクトリを確保した「直後」から try を始める。ページ生成（newPage）が失敗した場合でも
+  // finally が必ず走り、作りっぱなしの一時ディレクトリが OS の temp 領域に残らないようにする
+  // （§8 リソースを確実に解放する）
   try {
-    // メインページを開き、データ取得が終わるまで待つ
-    await page.goto(`${origin}/index.html`, { waitUntil: "networkidle" });
-    // 遷移先のカードが透明のまま写らないよう、先にアニメーションを一巡させる
-    await primeScrollAnimations(page);
+    // GIF 用のページを開く（静止画と同じデスクトップ幅で撮る）
+    const page = await browser.newPage({
+      viewport: { width: DESKTOP_WIDTH, height: DESKTOP_HEIGHT },
+    });
 
-    // 書き出したコマ数のカウンタ（ファイル名の連番に使う）
-    let frameIndex = 0;
+    try {
+      // メインページを開き、データ取得が終わるまで待つ
+      await page.goto(`${origin}/index.html`, { waitUntil: "networkidle" });
+      // 遷移先のカードが透明のまま写らないよう、先にアニメーションを一巡させる
+      await primeScrollAnimations(page);
 
-    /**
-     * 現在の画面を 1 コマとして書き出し、次のコマまで待つ。
-     * @returns {Promise<void>} 1 コマの書き出しと待機が終わったら解決する Promise
-     */
-    const captureFrame = async () => {
-      // 連番 4 桁のファイル名にして ffmpeg が順序どおり読めるようにする
-      const name = `frame-${String(frameIndex).padStart(4, "0")}.png`;
-      // 現在のビューポートを 1 コマとして書き出す
-      await page.screenshot({ path: join(framesDir, name) });
-      // 次のコマ用にカウンタを進める
-      frameIndex += 1;
-      // 実際の再生間隔と同じだけ待ってから次のコマを撮る（等速の動きに見せる）
-      await page.waitForTimeout(GIF_FRAME_INTERVAL_MS);
-    };
+      // 書き出したコマ数のカウンタ（ファイル名の連番に使う）
+      let frameIndex = 0;
 
-    // 冒頭にファーストビューの静止コマを数枚入れて「どのページか」を分かるようにする
-    for (let i = 0; i < GIF_INTRO_FRAMES; i += 1) await captureFrame();
+      /**
+       * 現在の画面を 1 コマとして書き出し、次のコマまで待つ。
+       * @returns {Promise<void>} 1 コマの書き出しと待機が終わったら解決する Promise
+       */
+      const captureFrame = async () => {
+        // 連番 4 桁のファイル名にして ffmpeg が順序どおり読めるようにする
+        const name = `frame-${String(frameIndex).padStart(4, "0")}.png`;
+        // 現在のビューポートを 1 コマとして書き出す
+        await page.screenshot({ path: join(framesDir, name) });
+        // 次のコマ用にカウンタを進める
+        frameIndex += 1;
+        // 実際の再生間隔と同じだけ待ってから次のコマを撮る（等速の動きに見せる）
+        await page.waitForTimeout(GIF_FRAME_INTERVAL_MS);
+      };
 
-    // 各セクションへナビゲーションリンクで移動しながらコマを撮っていく
-    for (const sectionId of GIF_SECTIONS) {
-      // ヘッダのナビゲーションにある該当リンクをクリックする（実際の操作を再現する）
-      await page.click(`nav a[href="#${sectionId}"]`);
-      // スムーススクロールの途中経過を複数コマに分けて記録する
-      for (let i = 0; i < GIF_FRAMES_PER_SECTION; i += 1) await captureFrame();
+      // 冒頭にファーストビューの静止コマを数枚入れて「どのページか」を分かるようにする
+      for (let i = 0; i < GIF_INTRO_FRAMES; i += 1) await captureFrame();
+
+      // 各セクションへナビゲーションリンクで移動しながらコマを撮っていく
+      for (const sectionId of GIF_SECTIONS) {
+        // ヘッダのナビゲーションにある該当リンクをクリックする（実際の操作を再現する）
+        await page.click(`nav a[href="#${sectionId}"]`);
+        // スムーススクロールの途中経過を複数コマに分けて記録する
+        for (let i = 0; i < GIF_FRAMES_PER_SECTION; i += 1) await captureFrame();
+      }
+
+      // 出力する GIF のファイルパス
+      const gifPath = join(outputDir, "portfolio-nav.gif");
+      // ffmpeg でコマ画像を GIF に変換する。
+      // 256 色しか使えない GIF は、既定の固定パレットだとダークテーマのグラデーションが
+      // 大きく破綻するため、palettegen で内容に合わせたパレットを作ってから paletteuse で適用する
+      await run("ffmpeg", [
+        "-y", // 既存ファイルを確認なしで上書きする
+        "-loglevel", "error", // バナーやパレット生成の情報ログを抑え、本当のエラーだけを残す
+        "-nostdin", // 標準入力を読みに行かせない（スクリプト実行中に端末を奪われないようにする）
+        "-framerate", String(GIF_FRAMERATE), // 入力コマ画像の再生速度（撮影間隔と一致させる）
+        "-i", join(framesDir, "frame-%04d.png"), // 連番のコマ画像を入力にする
+        "-filter_complex", // 縮小 → パレット生成 → パレット適用を 1 つのフィルタグラフで行う
+        `[0:v] scale=${GIF_WIDTH}:-1:flags=lanczos,split [scaled][forPalette];` +
+          `[forPalette] palettegen=stats_mode=diff [palette];` +
+          `[scaled][palette] paletteuse=dither=bayer:bayer_scale=5`,
+        "-loop", "0", // 0 は無限ループ再生を意味する（README 上で繰り返し再生させる）
+        gifPath, // 出力先の GIF ファイル
+      ]);
+    } finally {
+      // 成功・失敗にかかわらずページを閉じる（§8 リソースを確実に解放する）
+      await page.close();
     }
-
-    // 出力する GIF のファイルパス
-    const gifPath = join(outputDir, "portfolio-nav.gif");
-    // ffmpeg でコマ画像を GIF に変換する。
-    // 256 色しか使えない GIF は、既定の固定パレットだとダークテーマのグラデーションが
-    // 大きく破綻するため、palettegen で内容に合わせたパレットを作ってから paletteuse で適用する
-    await run("ffmpeg", [
-      "-y", // 既存ファイルを確認なしで上書きする
-      "-loglevel", "error", // バナーやパレット生成の情報ログを抑え、本当のエラーだけを残す
-      "-nostdin", // 標準入力を読みに行かせない（スクリプト実行中に端末を奪われないようにする）
-      "-framerate", String(GIF_FRAMERATE), // 入力コマ画像の再生速度（撮影間隔と一致させる）
-      "-i", join(framesDir, "frame-%04d.png"), // 連番のコマ画像を入力にする
-      "-filter_complex", // 縮小 → パレット生成 → パレット適用を 1 つのフィルタグラフで行う
-      `[0:v] scale=${GIF_WIDTH}:-1:flags=lanczos,split [scaled][forPalette];` +
-        `[forPalette] palettegen=stats_mode=diff [palette];` +
-        `[scaled][palette] paletteuse=dither=bayer:bayer_scale=5`,
-      "-loop", "0", // 0 は無限ループ再生を意味する（README 上で繰り返し再生させる）
-      gifPath, // 出力先の GIF ファイル
-    ]);
   } finally {
-    // 成功・失敗にかかわらずページを閉じる（§8 リソースを確実に解放する）
-    await page.close();
-    // コマ画像の一時ディレクトリも必ず片付ける
+    // ページの後始末が失敗しても一時ディレクトリの削除まで確実に到達させるため、
+    // 「ページを閉じる」finally とは別の階層で片付ける（前者は内側の finally が担当する）
     await rm(framesDir, { recursive: true, force: true });
   }
 }
@@ -266,22 +274,33 @@ async function main() {
   await mkdir(outputDir, { recursive: true });
   // 撮影対象のサイトをローカル HTTP で配信する
   const server = await startStaticServer(repoRoot, CAPTURE_PORT);
-  // 環境変数で実行ファイルが指定されていればそれを使う（未指定なら Playwright 同梱の Chromium）
-  const executablePath = process.env[CHROMIUM_EXECUTABLE_ENV];
-  // Playwright の Chromium をヘッドレスで起動する
-  const browser = await chromium.launch(executablePath ? { executablePath } : {});
 
+  // サーバーを起動した「直後」から try を始める。待ち受け中のサーバーは Node のイベントループを
+  // 動かし続けるハンドルなので、閉じ忘れるとプロセスが終了できない。以前はブラウザ起動
+  // (chromium.launch) が try の外にあり、Chromium が未インストールで起動に失敗すると
+  // server.close() に到達しないまま catch へ抜け、エラーを表示したあとプロセスが終了コード 1 で
+  // 終わらず無応答のままハングしていた（CI ではジョブがタイムアウトするまで気づけない）。
+  // ブラウザ起動を try の内側へ移し、失敗時も必ずサーバーを閉じてプロセスが終了できるようにする
   try {
-    // 静止画 4 枚を撮る
-    await captureStills(browser, server.origin);
-    // デモ GIF を 1 本撮る
-    await captureNavigationGif(browser, server.origin);
-    // どこへ書き出したかを利用者に伝える
-    console.log(`撮影が完了しました: ${outputDir}`);
+    // 環境変数で実行ファイルが指定されていればそれを使う（未指定なら Playwright 同梱の Chromium）
+    const executablePath = process.env[CHROMIUM_EXECUTABLE_ENV];
+    // Playwright の Chromium をヘッドレスで起動する
+    const browser = await chromium.launch(executablePath ? { executablePath } : {});
+
+    try {
+      // 静止画 4 枚を撮る
+      await captureStills(browser, server.origin);
+      // デモ GIF を 1 本撮る
+      await captureNavigationGif(browser, server.origin);
+      // どこへ書き出したかを利用者に伝える
+      console.log(`撮影が完了しました: ${outputDir}`);
+    } finally {
+      // 成功・失敗にかかわらずブラウザを閉じる
+      await browser.close();
+    }
   } finally {
-    // 成功・失敗にかかわらずブラウザを閉じる
-    await browser.close();
-    // 配信サーバーも必ず停止する
+    // ブラウザの後始末が失敗してもサーバー停止まで確実に到達させるため、
+    // 「ブラウザを閉じる」finally とは別の階層で停止する（前者は内側の finally が担当する）
     await server.close();
   }
 }

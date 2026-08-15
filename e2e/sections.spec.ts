@@ -82,7 +82,14 @@ async function expectLocalLinksOk(page: Page): Promise<void> {
       els
         .map((el) => (el as HTMLAnchorElement).href) // href プロパティは絶対 URL に解決済み
         .filter((href) => href.startsWith(location.origin)) // 同一オリジンのリンクだけに絞る
-        .filter((href) => !href.includes("#")) // ページ内アンカーは expectAnchorsResolve が担当
+        // フラグメント (#xxx) を切り落として「リンク先ファイル」の URL に正規化する。
+        // 単に "#" を含む URL を捨ててしまうと resume.html#skills のような他ページ内の
+        // アンカーへのリンクが検証対象から漏れる（このファイルが防ぎたい「リンク 404」
+        // そのものを見逃す）ため、フラグメントだけ外してファイルの存在は必ず確認する。
+        .map((href) => href.split("#")[0])
+        // 自分自身を指すもの（#about のようなページ内アンカー）は除外する。
+        // 遷移先 ID の存在は expectAnchorsResolve が担当しており、ここで取得しても重複になる。
+        .filter((href) => href !== location.href.split("#")[0])
     );
   // 重複 (同じ PDF への複数リンク等) を除いて無駄なリクエストを減らす
   const unique = [...new Set(urls)];

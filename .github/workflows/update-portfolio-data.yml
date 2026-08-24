@@ -377,7 +377,13 @@ jobs:
           # push したコミットの SHA を後段へ渡す。後段は PR の先端がこの SHA になっている
           # ことを確認してからマージする（GitHub 側の状態が push 前のまま返ってきたときに、
           # 古い内容のまま「マージ可能」と判断して取り込むのを防ぐため）。
-          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          # base_generated_at と同じ理由で、コマンド置換を echo の引数に直接置かない
+          # （失敗しても errexit が働かず、空の SHA が後段へ渡ってしまう）。
+          if ! pushed_sha="$(git rev-parse HEAD)"; then
+              echo "::error::push したコミットの SHA を取得できませんでした。"
+              exit 1
+          fi
+          echo "sha=${pushed_sha}" >> "$GITHUB_OUTPUT"
       - name: Create pull request and enable auto-merge
         # 前段が成功していれば必ず新しいコミットが push されている
         # （generated_at が毎回変わるため「変更なし」で素通りする日は存在せず、
@@ -390,6 +396,10 @@ jobs:
           # PR を「自分のものだ」と判定するためのオーナー名。fork の同名ブランチと
           # 区別するために使う（own_open_pr_number の絞り込みを参照）。
           REPO_OWNER: ${{ github.repository_owner }}
+          # 同名ブランチを持つ「同じオーナーの別リポジトリ」と取り違えないための repo 名
+          REPO_NAME: ${{ github.event.repository.name }}
+          # REST API を叩くときの owner/repo 形式のフルネーム
+          REPO_FULL_NAME: ${{ github.repository }}
           # PAT が設定されているかどうか。値そのものは使わず有無だけを見て、
           # 「必須チェックが自動起動しない構成」を実行中に警告するために使う。
           HAS_DEPLOY_TOKEN: ${{ secrets.PAGES_DEPLOY_TOKEN != '' }}
@@ -455,7 +465,9 @@ jobs:
               mergeable_paths="$(printf '%s\n%s\n' "$DATA_FILE" "$MERGEABLE_EXTRA_PATHS")"
               # 変更パスの一覧を取得する。取れなければ範囲を確かめられないので中止するが、
               # 一時的な API エラーで 1 日分の更新を落とさないよう他の読み取りと同じく再試行する
-              if ! retry_capture gh pr view "$pr_number" --json files --jq '.files[].path'; then
+              # gh pr view --json files は先頭 100 件で打ち切られ、超過分を検査せずに
+              # 「想定外なし」と判定してしまう。REST API をページングして全件取得する。
+              if ! retry_capture gh api --paginate "repos/${REPO_FULL_NAME}/pulls/${pr_number}/files" --jq '.[].path'; then
                   echo "::error::PR #${pr_number} の変更ファイル一覧を取得できませんでした。範囲を確認できないため取り込みを中止します。"
                   exit 1
               fi
@@ -497,7 +509,7 @@ jobs:
                   fi
               done <<< "$files"
               if [ -n "$unexpected" ]; then
-                  echo "::error::PR #${pr_number} に想定外の変更が含まれています: ${unexpected}。データ更新として自動マージできないため中止します。更新ブランチ $DATA_BRANCH の内容を確認してください。"
+                  echo "::error::PR #${pr_number} に想定外の変更が含まれています: $(printf '%s' "$unexpected" | escape_annotation)。データ更新として自動マージできないため中止します。更新ブランチ $DATA_BRANCH の内容を確認してください。"
                   exit 1
               fi
           }
@@ -555,16 +567,23 @@ jobs:
           #   - こちらの PR が「既にある」と誤認されて作られなくなる
           #   - その第三者の PR に対して pull-requests: write のトークンで auto-merge を予約する
           # という 2 つの実害が出るため、headRepositoryOwner で自分のものだけに限定する。
-          # オーナー名は jq のソースへ文字列連結せず --arg でデータとして渡す（§9）。
+          # 判定はオーナー名だけでなくリポジトリ名まで見る。同じオーナーの別リポジトリに
+          # 同名ブランチがあると、オーナー名だけでは自分の PR と区別できないため。
+          # 値は jq のソースへ文字列連結せず --arg でデータとして渡す（§9）。
           own_open_pr_number() {
               gh pr list \
                   --head "$DATA_BRANCH" \
                   --base "$BASE_BRANCH" \
                   --state open \
-                  --json number,headRepositoryOwner \
-                  | jq -r --arg owner "$REPO_OWNER" \
-                       '[.[] | select(.headRepositoryOwner.login == $owner)] | .[0].number // empty'
+                  --json number,headRepositoryOwner,headRepository \
+                  | jq -r --arg owner "$REPO_OWNER" --arg repo "$REPO_NAME" \
+                       '[.[] | select(.headRepositoryOwner.login == $owner and .headRepository.name == $repo)] | .[0].number // empty'
           }
+
+          # 先端の取得に失敗したときの理由を控える場所（空なら理由なし）
+          fetch_err="$(mktemp)"
+          head_fetch_error=""
+          trap 'rm -f "$fetch_err" "${create_err:-}"' EXIT
 
           # PR の先端が「この実行で push したコミットを含んでいる」かを判定する。
           # 完全一致にしないのは、更新ブランチへ正当に別のコミットが積まれることがあるため
@@ -581,8 +600,11 @@ jobs:
               if [ "$head" = "$PUSHED_SHA" ]; then
                   return 0
               fi
-              # 別コミットの場合はローカルに無いことがあるので取得を試みる
-              if ! git fetch --no-tags --quiet origin "$head" 2>/dev/null; then
+              # 別コミットの場合はローカルに無いことがあるので取得を試みる。
+              # 失敗の理由（認証切れ・通信障害）を捨てると、後段が「内容が古い」と
+              # 誤って報告してしまうため、理由を控えて呼び出し側から見えるようにする。
+              if ! git fetch --no-tags --quiet origin "$head" 2>"$fetch_err"; then
+                  head_fetch_error="$(escape_annotation < "$fetch_err")"
                   # 取得できなければ包含関係を確かめられないので、安全側に倒して未達とする
                   return 1
               fi
@@ -600,6 +622,21 @@ jobs:
               esac
           }
 
+          # CLEAN（待ち条件なし）と確認できた PR を取り込む共通処理。
+          # 2 箇所（ループ内の確定時／ループ後の最終確認）から呼ぶため関数にする（§6 DRY）。
+          # PR 作成直後に CLEAN になるのは必須ステータスチェックが設定されていない場合でもあり、
+          # その構成では CI の完了を待たずに入る。意図した運用と食い違っていないか
+          # 気づけるよう警告を出す（保護設定はリポジトリ側の判断なので赤にはしない）。
+          #   $1 … ログに残す確認の文脈
+          merge_clean_pr() {
+              echo "::warning::PR が待ち条件なし（CLEAN）で取り込み可能でした。必須ステータスチェックが設定されていない場合、CI の完了を待たずにマージされます。ブランチ保護の必須チェック設定を確認してください。"
+              if ! merge_pr immediate; then
+                  echo "::error::${hint_squash} ${hint_auto}"
+                  exit 1
+              fi
+              log "取り込みを手配しました（$1 / 方式: ${merge_mode}）"
+          }
+
           # 既存の PR を探す。一時的な API エラーで 1 日分の更新を落とさないよう再試行し、
           # それでも駄目なら原因を明示して止める（生の gh エラーだけで終わらせない）。
           if ! retry_capture own_open_pr_number; then
@@ -613,9 +650,8 @@ jobs:
               # gh pr create は作成した PR の URL を標準出力に出す。
               # 標準エラーは混ぜずに別ファイルへ流す。混ぜると gh の警告行などが
               # 標準出力の URL の後ろに付き、末尾を切り出す番号の解析が壊れる。
-              # 一時ファイルはステップ終了時に片付ける
+              # 一時ファイルはステップ終了時にまとめて片付ける（上の trap が対象に含む）
               create_err="$(mktemp)"
-              trap 'rm -f "$create_err"' EXIT
               create_output=""
               if create_output="$(gh pr create \
                   --base "$BASE_BRANCH" \
@@ -642,7 +678,7 @@ jobs:
                       #   - PAGES_DEPLOY_TOKEN 設定済みだが権限不足 … push は通るが PR 作成が 403 になる
                       # 更新ブランチは push 済みなので手動で PR を作れば取り込めるが、
                       # 気づかないまま放置されないようジョブは赤で終わらせる。
-                      echo "::error::PR を作成できませんでした（gh の出力: $(tr '\n' ' ' < "$create_err"))。PAGES_DEPLOY_TOKEN を設定している場合は contents: write に加えて pull-requests: write の権限があるか確認してください。未設定の場合はリポジトリ設定の 'Allow GitHub Actions to create and approve pull requests' を有効にするか、PAGES_DEPLOY_TOKEN を設定してください。更新ブランチ $DATA_BRANCH は push 済みです。"
+                      echo "::error::PR を作成できませんでした（gh の出力: $(escape_annotation < "$create_err")）。PAGES_DEPLOY_TOKEN を設定している場合は contents: write に加えて pull-requests: write の権限があるか確認してください。未設定の場合はリポジトリ設定の 'Allow GitHub Actions to create and approve pull requests' を有効にするか、PAGES_DEPLOY_TOKEN を設定してください。更新ブランチ $DATA_BRANCH は push 済みです。"
                       exit 1
                   fi
                   log "PR の作成は失敗しましたが、既存の PR #${pr_number} が見つかったため再利用します"
@@ -726,12 +762,7 @@ jobs:
                           # 設定されていない場合でもある。その場合 CI の完了を待たずに入るので、
                           # 意図した運用と食い違っていないか気づけるよう警告を出す
                           # （保護設定はリポジトリ側の判断なので赤にはしない）。
-                          echo "::warning::PR が待ち条件なし（CLEAN）で取り込み可能でした。必須ステータスチェックが設定されていない場合、CI の完了を待たずにマージされます。ブランチ保護の必須チェック設定を確認してください。"
-                          if ! merge_pr immediate; then
-                              echo "::error::${hint_squash} ${hint_auto}"
-                              exit 1
-                          fi
-                          log "取り込みを手配しました（方式: ${merge_mode}）"
+                          merge_clean_pr "確認 ${clean_seen} 回目"
                           merge_arranged=true
                           break
                           ;;
@@ -772,6 +803,11 @@ jobs:
                   echo "::error::PR #${pr_number} の状態を一度も取得できませんでした。トークンの有効期限や GitHub API の状況を確認してください。更新ブランチ $DATA_BRANCH は push 済みです。"
                   exit 1
               fi
+              if [ -n "$head_fetch_error" ]; then
+                  # 取得自体に失敗していたなら、内容ではなく通信・認証の問題として報告する
+                  echo "::error::PR #${pr_number} の先端コミットを取得できませんでした: ${head_fetch_error}"
+                  exit 1
+              fi
               echo "::error::PR #${pr_number} の先端が push したコミット（${PUSHED_SHA}）を含んでいません。取り込むと古い内容をマージする恐れがあるため中止します。"
               exit 1
           fi
@@ -787,13 +823,18 @@ jobs:
               # 最終試行で初めて CLEAN を読んだ場合は、確認回数が足りずここへ来る。
               # 「計算されなかった」わけではないので、CLEAN として扱い警告も出す。
               if [ "$merge_state" = "CLEAN" ]; then
-                  echo "::warning::PR が待ち条件なし（CLEAN）で取り込み可能でした。必須ステータスチェックが設定されていない場合、CI の完了を待たずにマージされます。ブランチ保護の必須チェック設定を確認してください。"
-                  if ! merge_pr immediate; then
-                      echo "::error::${hint_squash} ${hint_auto}"
-                      exit 1
+                  # ここで持っている CLEAN は最後に読めた値で、読み取りに失敗し続けた場合は
+                  # かなり古いことがある。取り込みは後戻りできないので、直前に読み直して
+                  # いまも CLEAN であることを確かめてから動く（ループ内で 1 回の観測を
+                  # 信用しないのと同じ理由）。
+                  recheck="$(gh pr view "$pr_number" --json mergeStateStatus --jq '.mergeStateStatus' || echo UNKNOWN)"
+                  if [ "$recheck" = "CLEAN" ]; then
+                      merge_clean_pr "最終確認"
+                      merge_arranged=true
+                  else
+                      log "最後に読めた CLEAN は再確認で ${recheck} でした。予約に切り替えます"
+                      merge_state="$recheck"
                   fi
-                  log "取り込みを手配しました（最終確認で CLEAN / 方式: ${merge_mode}）"
-                  merge_arranged=true
               fi
           fi
 

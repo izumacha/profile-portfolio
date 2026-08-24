@@ -83,6 +83,14 @@ jobs:
           #     auto-merge の「予約」自体は成功してしまい当日は区別できないので、
           #     後続の実行が「一定時間を超えて open なままの PR がある」ことで検知して赤にする。
           # いずれも最終的には赤で気づける（黙って緑にしない）。
+          #
+          # このトークン選択式は PR 作成ステップの GH_TOKEN にも同じ形で書いてある。
+          # 他の定数のように workflow の env: へ括り出していないのは、そうすると
+          # トークンがこのジョブの全ステップ（データ取得の github-script を含む）へ
+          # 環境変数として渡り、必要のない範囲まで露出するため（§9 最小公開）。
+          # 重複は 2 箇所だけなので、DRY より露出を絞る方を優先している。
+          # 片方だけ変えると「push は PAT・PR 作成は GITHUB_TOKEN」というちぐはぐな
+          # 状態になるので、変更するときは必ず両方そろえること。
           token: ${{ secrets.PAGES_DEPLOY_TOKEN || secrets.GITHUB_TOKEN }}
           # 後段の git push がこの checkout の認証情報を再利用できるように残す（既定 true だが明示）。
           persist-credentials: true
@@ -272,8 +280,8 @@ jobs:
           # 「毎日実行されているのにデータが一切更新されない」状態が緑のまま続くので、
           # 何もしない分岐にはせず、原因を出して赤で止める。
           if git diff --quiet -- "$DATA_FILE"; then
-            echo "::error::$DATA_FILE が更新されていません。generated_at は毎回変わるはずなので、前段のデータ生成が書き出しに失敗している可能性があります。"
-            exit 1
+              echo "::error::$DATA_FILE が更新されていません。generated_at は毎回変わるはずなので、前段のデータ生成が書き出しに失敗している可能性があります。"
+              exit 1
           fi
 
           # コミットの著者を Actions ボット名義に設定する
@@ -323,41 +331,66 @@ jobs:
         #   書き出しが無かった場合は前段が赤で止まる）。よって条件分岐は不要。
         env:
           # gh CLI の認証。checkout と同じ優先順位（PAT があれば PAT、無ければ GITHUB_TOKEN）。
+          # checkout ステップの token と同じ式を意図的に 2 箇所に書いている
+          # （理由は checkout 側のコメント参照。変更時は必ず両方そろえること）。
           # GITHUB_TOKEN フォールバック時は、作成した PR で必須チェックが自動起動しない点に注意
           # （checkout ステップのコメント参照。その場合は人が CI を起動しマージする）。
           GH_TOKEN: ${{ secrets.PAGES_DEPLOY_TOKEN || secrets.GITHUB_TOKEN }}
+          # PR を「自分のものだ」と判定するためのオーナー名。fork の同名ブランチと
+          # 区別するために使う（下の own_prs の絞り込みを参照）。
+          REPO_OWNER: ${{ github.repository_owner }}
         run: |
           # 途中の失敗を握り潰さず即座に止める（未定義変数・パイプ失敗も検出）
           set -euo pipefail
 
           # 進捗ログは stderr へ出す（CLAUDE.md §6 の Bash 規約）。
-          # ::error:: 等の Actions 向け注釈だけは stdout に出す必要があるので分けて扱う。
+          # ::error:: / ::warning:: の注釈は Actions が stdout から拾うため分けて扱う。
           log() {
               echo "$@" >&2
           }
 
-          # PR のマージを手配する共通処理。3 箇所（CLEAN / チェック待ち / 判定未計算）で
-          # 同じ「gh pr merge を叩き、失敗したら原因を出して赤で止める」形が必要になるため
-          # 関数に切り出す（CLAUDE.md §6 の DRY）。
+          # gh pr merge を叩き、一時的な失敗なら少しだけ待って再試行する共通処理。
+          # 3 箇所（CLEAN / チェック待ち / 判定未計算）で同じ形が必要なため関数化する（§6 DRY）。
+          # 恒常的な設定不備なら再試行しても直らないので、最後は原因を出して赤で止める。
           #   $1 … 失敗時に出す原因・対処の案内（経路ごとに疑うべき設定が違うため引数で受ける）
           #   $2 以降 … gh pr merge に渡す引数
           arrange_merge() {
               # 1 つ目の引数を案内文として取り出し、残りを gh へ渡す引数として残す
               local hint="$1"
               shift
-              # マージ（または予約）を試み、失敗したら生の gh エラーで終わらせず案内を出す
-              if ! gh pr merge "$DATA_BRANCH" "$@"; then
-                  echo "::error::${hint}"
-                  exit 1
-              fi
+              # 502 等の一時的なエラーで 1 日分の更新を落とさないよう、view と同様に再試行する
+              local try
+              for try in $(seq 1 "$merge_attempts"); do
+                  if gh pr merge "$pr_number" "$@"; then
+                      return 0
+                  fi
+                  # 最終試行の後は待たない（実行しない再試行を告知しない）
+                  if [ "$try" -lt "$merge_attempts" ]; then
+                      log "マージ操作に失敗しました（${try}/${merge_attempts}）。${retry_wait} 秒後に再試行します"
+                      sleep "$retry_wait"
+                  fi
+              done
+              # 再試行しても通らなければ設定側の問題とみなし、案内を出して赤で止める
+              echo "::error::${hint}"
+              exit 1
           }
 
-          # 更新ブランチを head とし、起点ブランチへ向いた open な PR を作成時刻付きで取得する。
-          # --base で絞るのは、head 名が同じでも別ブランチ向けだったり fork 由来だったりする
-          # 無関係な PR を「自分が作った PR」と誤認しないようにするため。
-          open_prs="$(gh pr list --head "$DATA_BRANCH" --base "$BASE_BRANCH" --state open --json createdAt)"
-          # open な PR の件数（0 なら新規作成が必要）
-          open_pr_count="$(echo "$open_prs" | jq 'length')"
+          # このリポジトリのオーナーが持つ更新ブランチから、起点ブランチへ向いた open な PR を取る。
+          # gh の --head はブランチ「名」しか見ず、fork 側の同名ブランチから出された PR にも
+          # 一致してしまう。絞り込まないと、第三者が同じ名前のブランチで PR を出すだけで
+          #   - こちらの PR が「既にある」と誤認されて作られなくなる
+          #   - その第三者の PR に対して pull-requests: write のトークンで auto-merge を予約する
+          # という 2 つの実害が出るため、headRepositoryOwner で自分のものだけに限定する。
+          own_prs="$(gh pr list \
+              --head "$DATA_BRANCH" \
+              --base "$BASE_BRANCH" \
+              --state open \
+              --json number,createdAt,headRepositoryOwner \
+              --jq "[.[] | select(.headRepositoryOwner.login == \"$REPO_OWNER\")]")"
+
+          # 以降の view / merge はブランチ名ではなく PR 番号で指定する
+          # （名前で指定すると上と同じ取り違えが起きるため）。
+          pr_number="$(echo "$own_prs" | jq -r '.[0].number // empty')"
 
           # 「開いている」だけでは滞留と判断できない。日次実行の数分後に手動実行した場合、
           # その日の PR はまだ必須チェック実行中で当然 open のままだからである
@@ -367,12 +400,21 @@ jobs:
           # 時刻計算は date ではなく jq で行う（date -d は GNU 依存で、CLAUDE.md §10 の
           # 移植性に反し macOS 等では動かないため。jq の now / fromdateiso8601 は移植可能）。
           STALE_PR_HOURS=12
-          stale_prs="$(echo "$open_prs" \
-              | jq --argjson h "$STALE_PR_HOURS" \
-                   '[.[] | select((.createdAt | fromdateiso8601) < (now - $h * 3600))] | length')"
+          # open な PR のうち STALE_PR_HOURS より古いものを数える共通処理。
+          # 手配の前と後で 2 回評価するため関数にする（後述の再評価を参照）。
+          count_stale_prs() {
+              gh pr list \
+                  --head "$DATA_BRANCH" \
+                  --base "$BASE_BRANCH" \
+                  --state open \
+                  --json createdAt,headRepositoryOwner \
+                  --jq "[.[] | select(.headRepositoryOwner.login == \"$REPO_OWNER\")]" \
+                  | jq --argjson h "$STALE_PR_HOURS" \
+                       '[.[] | select((.createdAt | fromdateiso8601) < (now - $h * 3600))] | length'
+          }
 
           # PR がまだ無ければ新規作成する（既にあれば先の push で内容は更新済み）
-          if [ "$open_pr_count" = "0" ]; then
+          if [ -z "$pr_number" ]; then
               # 起点ブランチ向けの PR を、コミットと同じ件名で ready（非 draft）として作成する
               if ! gh pr create \
                   --base "$BASE_BRANCH" \
@@ -388,6 +430,18 @@ jobs:
                   echo "::error::PR を作成できませんでした。PAGES_DEPLOY_TOKEN を設定している場合は contents: write に加えて pull-requests: write の権限があるか確認してください。未設定の場合はリポジトリ設定の 'Allow GitHub Actions to create and approve pull requests' を有効にするか、PAGES_DEPLOY_TOKEN を設定してください。更新ブランチ $DATA_BRANCH は push 済みです。"
                   exit 1
               fi
+              # 作成した PR の番号を取り直す（以降は番号で指定するため）
+              pr_number="$(gh pr list \
+                  --head "$DATA_BRANCH" \
+                  --base "$BASE_BRANCH" \
+                  --state open \
+                  --json number,headRepositoryOwner \
+                  --jq "[.[] | select(.headRepositoryOwner.login == \"$REPO_OWNER\")] | .[0].number // empty")"
+              # 直前に作った PR が見つからないのは想定外なので、黙って進めず止める
+              if [ -z "$pr_number" ]; then
+                  echo "::error::作成した PR の番号を取得できませんでした。"
+                  exit 1
+              fi
           fi
 
           # マージ可否判定（mergeStateStatus）を見てから取り込み方を選ぶ。
@@ -395,10 +449,9 @@ jobs:
           # 必須チェックが無い等ですでに CLEAN な PR に対しては
           # "Pull request is in clean status" で失敗するため、--auto 一本槍にはできない。
           # GitHub 側の判定は PR 作成直後だと UNKNOWN（未計算）になり得るので、その間だけ待つ。
-          merge_attempts=10     # 判定待ちの最大試行回数
+          merge_attempts=10     # 判定待ち・再試行の最大回数
           retry_wait=15         # 試行間隔（秒）。10 回 x 15 秒 = 最大約 135 秒待つ
           merge_arranged=false  # 取り込み（即時マージ or 予約）まで到達できたか
-          merged_now=false      # この実行で実際に main へ取り込んだか（滞留判定で使う）
 
           # 失敗時の案内は経路ごとに疑うべき設定が異なるので、使い回さず個別に用意する。
           # 予約（--auto）が失敗するのは auto-merge 設定か権限。
@@ -411,7 +464,7 @@ jobs:
               # ステップごと落とさず、UNKNOWN と同じ「未計算」として再試行に回す。
               # 恒常的な権限エラーの場合もここでは UNKNOWN になるが、待ち時間を使い切った
               # 後の予約試行が失敗し、その時点で権限を含む案内が出る。
-              merge_state="$(gh pr view "$DATA_BRANCH" --json mergeStateStatus --jq '.mergeStateStatus' || echo UNKNOWN)"
+              merge_state="$(gh pr view "$pr_number" --json mergeStateStatus --jq '.mergeStateStatus' || echo UNKNOWN)"
 
               case "$merge_state" in
                   UNKNOWN)
@@ -420,16 +473,27 @@ jobs:
                       ;;
                   CLEAN)
                       # 待つべき条件が無い＝いま取り込める。そのまま squash マージする
-                      # （ブランチ保護は API 側で評価されるため、保護を迂回することはない）
+                      # （ブランチ保護は API 側で評価されるため、保護を迂回することはない）。
+                      # ただし PR 作成直後に CLEAN になるのは、必須ステータスチェックが
+                      # 設定されていない場合でもある。その場合 CI の完了を待たずに入るので、
+                      # 意図した運用（チェック通過後に取り込む）と食い違っていないか気づけるよう
+                      # 警告を出す（保護設定はリポジトリ側の判断なので赤にはしない）。
+                      echo "::warning::PR が待ち条件なし（CLEAN）で取り込み可能でした。必須ステータスチェックが設定されていない場合、CI の完了を待たずにマージされます。ブランチ保護の必須チェック設定を確認してください。"
                       arrange_merge "$hint_squash" --squash
-                      log "必須チェック通過済みのため即時 squash マージしました"
+                      log "取り込み可能だったため即時 squash マージしました"
                       merge_arranged=true
-                      # 実際に取り込めたので、滞留していた PR もこの時点で解消している
-                      merged_now=true
                       break
                       ;;
+                  DIRTY)
+                      # 起点ブランチ側と競合している。auto-merge は競合 PR には予約できないため、
+                      # 設定不備と誤認されないよう原因を明示して止める。
+                      # 次回実行は起点ブランチの最新から作り直すので、通常は自然に解消する。
+                      echo "::error::更新 PR が起点ブランチと競合しています（mergeStateStatus=DIRTY）。$DATA_FILE を変更する別の PR が先に入った可能性があります。次回の実行は最新の $BASE_BRANCH から作り直すため通常は自動で解消しますが、解消しない場合は PR を確認してください。"
+                      exit 1
+                      ;;
                   *)
-                      # BLOCKED / UNSTABLE など「チェック待ち」の状態。通過を条件に予約する
+                      # BLOCKED / UNSTABLE / BEHIND など「まだ入れられない」状態。
+                      # 条件が整い次第の取り込みを予約する
                       arrange_merge "$hint_auto" --auto --squash
                       log "auto-merge（squash）を予約しました（状態: ${merge_state}）"
                       merge_arranged=true
@@ -454,16 +518,16 @@ jobs:
               log "auto-merge（squash）を予約しました（状態未計算のまま予約）"
           fi
 
-          # 取り込みの手配自体は成功しても、それが実際に main へ入るとは限らない。
+          # 取り込みの手配自体は成功しても、それが実際に取り込まれるとは限らない。
           # 代表例が PAGES_DEPLOY_TOKEN 未設定のケースで、GITHUB_TOKEN が起こした
           # イベントは他のワークフローを起動しないため PR の必須チェックが永久に走らず、
           # auto-merge の「予約」だけが成功して PR は BLOCKED のまま滞留する。
           # この滞留はその日の実行時点では区別できないので、後続の実行で検知する:
-          # 正常なら PR は数分で閉じるため、STALE_PR_HOURS を超えて open だった PR が
+          # 正常なら PR は数分で閉じるため、STALE_PR_HOURS を超えて open なままの PR が
           # あれば前回分が取り込まれていない＝パイプラインが止まっているとみなして赤で知らせる。
-          # ただし、この実行で実際に取り込めた場合は自力で復旧できているので赤にしない
-          # （取り込み済みの PR について「残っています」と報告するのは誤りになる）。
-          if [ "$stale_prs" != "0" ] && [ "$merged_now" != "true" ]; then
-              echo "::error::前回の更新 PR が ${STALE_PR_HOURS} 時間以上取り込まれずに残っていました。必須チェックが起動しているか（PAGES_DEPLOY_TOKEN 未設定だと起動しません）、auto-merge（Allow auto-merge）が有効かを確認してください。PR は今回の内容へ更新済みです。"
+          # 判定はここで取り直す。手配の前の値で判断すると、滞留していた PR を
+          # この実行が実際に取り込めた場合まで「残っています」と誤って赤にしてしまう。
+          if [ "$(count_stale_prs)" != "0" ]; then
+              echo "::error::前回の更新 PR が ${STALE_PR_HOURS} 時間以上取り込まれずに残っています。必須チェックが起動しているか（PAGES_DEPLOY_TOKEN 未設定だと起動しません）、auto-merge（Allow auto-merge）が有効かを確認してください。PR は今回の内容へ更新済みです。"
               exit 1
           fi

@@ -325,6 +325,13 @@ jobs:
               echo "::error::起点ブランチの $DATA_FILE から generated_at を読めませんでした。ファイルが壊れている可能性があります。"
               exit 1
           fi
+          # キーが無い・null の場合は上のコマンドは成功して空文字が返る。空のまま渡すと
+          # 後段の鮮度検知が条件判定で黙って無効化される（コメントが防ぐと謳っている
+          # 事象そのもの）ため、読み取り失敗と同じく異常として止める
+          if [ -z "$base_generated_at" ]; then
+              echo "::error::起点ブランチの $DATA_FILE に generated_at がありません。生成物の形式が変わったか、ファイルが壊れている可能性があります。"
+              exit 1
+          fi
           # 値に改行が混じると 2 行目が別の出力として解釈され、sha 等を上書きできてしまう。
           # 改行を含み得る値は区切り文字付きのヒアドキュメント形式で書き出す。
           {
@@ -411,9 +418,12 @@ jobs:
           # PR を「自分のものだ」と判定するためのオーナー名。fork の同名ブランチと
           # 区別するために使う（own_open_pr_number の絞り込みを参照）。
           REPO_OWNER: ${{ github.repository_owner }}
-          # 同名ブランチを持つ「同じオーナーの別リポジトリ」と取り違えないための repo 名
-          REPO_NAME: ${{ github.event.repository.name }}
-          # REST API を叩くときの owner/repo 形式のフルネーム
+          # REST API を叩くときの owner/repo 形式のフルネーム。
+          # repo 名単体もここから取り出す（シェル冒頭の REPO_NAME 参照）。
+          # github.event.repository.name を使わないのは、このワークフローの主トリガーである
+          # schedule イベントでは event payload に repository が含まれず空になるため
+          # （空のまま own_open_pr_number の絞り込みに使うと自分の PR を見つけられず、
+          #   2 日目以降 "already exists" → 再取得も空 → 毎日赤、で止まってしまう）。
           REPO_FULL_NAME: ${{ github.repository }}
           # PAT が設定されているかどうか。値そのものは使わず有無だけを見て、
           # 「必須チェックが自動起動しない構成」を実行中に警告するために使う。
@@ -432,6 +442,10 @@ jobs:
           log() {
               echo "$@" >&2
           }
+
+          # 自分の PR かどうかの判定に使う repo 名。常に使える github.repository 由来の
+          # フルネーム（owner/repo）から取り出す（env の REPO_FULL_NAME のコメント参照）
+          REPO_NAME="${REPO_FULL_NAME#*/}"
 
           # （このヘルパーは PR 作成ステップにも同じ内容で置いている。run: ブロックは
           #   ステップごとに別のシェルなので関数を共有できないための重複であり、
@@ -485,7 +499,11 @@ jobs:
               # 一時的な API エラーで 1 日分の更新を落とさないよう他の読み取りと同じく再試行する
               # gh pr view --json files は先頭 100 件で打ち切られ、超過分を検査せずに
               # 「想定外なし」と判定してしまう。REST API をページングして全件取得する。
-              if ! retry_capture gh api --paginate "repos/${REPO_FULL_NAME}/pulls/${pr_number}/files" --jq '.[].path'; then
+              # REST のフィールド名は filename（GraphQL の files.path とは名前が異なる）。
+              # rename では filename に変更後のパスしか出ないため、変更元 previous_filename も
+              # 検査対象に含める（保護対象 → 許可ディレクトリへの rename が「想定内」として
+              # 素通りし、保護対象の削除が main へ入るのを防ぐ。両パスとも許可内であること）。
+              if ! retry_capture gh api --paginate "repos/${REPO_FULL_NAME}/pulls/${pr_number}/files" --jq '.[] | .filename, (.previous_filename // empty)'; then
                   echo "::error::PR #${pr_number} の変更ファイル一覧を取得できませんでした。範囲を確認できないため取り込みを中止します。"
                   exit 1
               fi
@@ -539,6 +557,24 @@ jobs:
               fi
           }
 
+          # 即時マージの実体。直近に読み取った PR 先端（pr_head）から動いていないことを
+          # --match-head-commit で条件に付け、変更範囲の検査からマージまでの間に
+          # 割り込んだコミットを検査せずに巻き込まない（割り込まれた場合はここが失敗し、
+          # 予約側へのフォールバックか次回実行に回る）。
+          # 予約（--auto）はこの固定が構造的にできず、予約後に積まれたコミットも条件成立時に
+          # まとめて取り込まれる。更新ブランチは本ワークフロー専用で、そこへ push できるのは
+          # リポジトリの書き込み権限者（= main の保護を管理できる側）に限られるため、
+          # 予約経路のこの隙間は受け入れている制約としてここに明記する。
+          merge_immediate() {
+              if [ -n "${pr_head:-}" ]; then
+                  # 検証済みの先端に固定してマージする
+                  gh pr merge "$pr_number" --squash --match-head-commit "$pr_head"
+              else
+                  # 先端をまだ読めていない経路（状態未計算のまま手配する場合）は固定できない
+                  gh pr merge "$pr_number" --squash
+              fi
+          }
+
           # PR を取り込む。読み取ったマージ可否は次の瞬間には変わり得るので、
           # 想定した方式が拒否されたらもう一方の方式も試す:
           #   即時マージ（--squash）    … 待ち条件が無い PR にしか通らない
@@ -548,13 +584,23 @@ jobs:
           #   $1 … 先に試す方式（immediate / auto）
           merge_pr() {
               local primary="$1"
-              local round
+              local round existing_auto
               # 取り込む前に、変更範囲が想定どおりかを必ず確かめる
               assert_changed_files_allowed
+              # 前回の実行が予約した auto-merge が PR に残っている場合、--auto を掛け直すと
+              # 「すでに有効」として失敗し得る（PR は日をまたいで再利用されるため起こり得る）。
+              # 予約が残っているなら目的は達成済みなので、掛け直さず成功として扱う
+              # （読み取りに失敗したときは判定せず、通常の手配へ進む）。
+              if existing_auto="$(gh pr view "$pr_number" --json autoMergeRequest --jq '.autoMergeRequest != null' 2>/dev/null)" \
+                  && [ "$existing_auto" = "true" ]; then
+                  merge_mode="auto"
+                  log "PR #${pr_number} には auto-merge が予約済みのため、そのまま利用します"
+                  return 0
+              fi
               for round in $(seq 1 "$merge_rounds"); do
                   if [ "$primary" = "immediate" ]; then
                       # 取り込める状態と読めたので、まず即時マージを試す
-                      if gh pr merge "$pr_number" --squash; then
+                      if merge_immediate; then
                           merge_mode="immediate"
                           return 0
                       fi
@@ -575,7 +621,7 @@ jobs:
                       # 押し込むと、走っているチェックを無視して取り込んでしまう）。
                       if [ "$(read_pr_field mergeStateStatus)" = "CLEAN" ]; then
                           echo "::warning::auto-merge を予約できなかったため、CLEAN であることを再確認して即時マージします。必須ステータスチェックの設定と auto-merge（Allow auto-merge）の有効化を確認してください。"
-                          if gh pr merge "$pr_number" --squash; then
+                          if merge_immediate; then
                               merge_mode="immediate"
                               return 0
                           fi
@@ -623,12 +669,14 @@ jobs:
           # 見たいのは「古い内容のまま取り込まれないこと」なので、包含していれば十分。
           pr_head_contains_pushed() {
               local head="$1"
+              # 失敗理由はこの呼び出しの結果だけを表すよう冒頭で毎回リセットする。
+              # 残したままだと、過去の試行の一時的な通信エラーがその後の状態を覆い隠し、
+              # 実際は「先端が古い / まだ読めていない」のに通信・認証の問題として誤報してしまう
+              head_fetch_error=""
               # まだ読めていない場合は追いついていない扱い
               if [ -z "$head" ]; then
                   return 1
               fi
-              # 前回の試行で控えた理由を持ち越さない（解消済みの障害を後段が誤って報告するため）
-              head_fetch_error=""
               # 同一コミットなら追加の問い合わせは不要
               if [ "$head" = "$PUSHED_SHA" ]; then
                   return 0

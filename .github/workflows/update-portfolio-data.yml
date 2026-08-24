@@ -72,6 +72,9 @@ jobs:
           # 理由 2: GITHUB_TOKEN による push は GitHub Pages の再ビルドもトリガーしないため、
           #         マージ後の公開が人手の publish まで遅れ得る（Codex 指摘 P1）。
           # PAT/App トークンなら「ユーザー操作」とみなされ、PR の CI も Pages 再ビルドも自動で動く。
+          # PAGES_DEPLOY_TOKEN に必要な権限は contents: write と pull-requests: write の 2 つ。
+          # PR 方式へ変更する前は contents: write だけで足りていたため、以前の手順に従って
+          # contents のみの PAT を設定していると push は通るのに gh pr create だけが 403 で落ちる。
           # GITHUB_TOKEN フォールバックは「動くが自動化されない」状態であり、無条件に安全ではない:
           #   - リポジトリ設定「Allow GitHub Actions to create and approve pull requests」が
           #     無効（GitHub の既定）だと gh pr create 自体が拒否され、PR すら作られない。
@@ -250,9 +253,7 @@ jobs:
             fs.writeFileSync(path, JSON.stringify(out, null, 2) + "\n");
             core.info(`${path} を更新しました`);
 
-      - name: Commit to update branch if changed
-        # 後続の PR 作成ステップが「コミットしたか」を参照できるように id を付ける
-        id: commit
+      - name: Commit to update branch
         run: |
           # 途中の失敗を握り潰さず即座に止める（未定義変数・パイプ失敗も検出）
           set -euo pipefail
@@ -264,46 +265,47 @@ jobs:
           # （更新を省くと、正常に検証できている日でも表示だけが古くなり、
           #   自己証明データが放置されているように見えてしまう）。
           # したがって generated_at を除外した比較にはしない。
-          # 取得が全滅した等でファイルが 1 バイトも変わらなかった場合だけ空振りする。
+          #
+          # 裏を返すと「差分なし」は正常な日の姿ではない。前段の github-script が
+          # 必ず新しい generated_at を書き込むため、ここへ到達して差分が無いのは
+          # 書き出しが行われなかった異常を意味する。黙って成功扱いにすると
+          # 「毎日実行されているのにデータが一切更新されない」状態が緑のまま続くので、
+          # 何もしない分岐にはせず、原因を出して赤で止める。
           if git diff --quiet -- "$DATA_FILE"; then
-            # ファイルがまったく変わらなかった日はコミットも PR も作らない
-            echo "差分なし: コミットをスキップします"
-            # 後続ステップへ「変更なし」を伝える
-            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "::error::$DATA_FILE が更新されていません。generated_at は毎回変わるはずなので、前段のデータ生成が書き出しに失敗している可能性があります。"
+            exit 1
+          fi
+
+          # コミットの著者を Actions ボット名義に設定する
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # 更新した JSON をステージする
+          git add "$DATA_FILE"
+          # 一元管理した共通の件名でコミットする
+          git commit -m "$COMMIT_TITLE"
+
+          # 既定ブランチはブランチ保護で直 push できないため、専用の更新ブランチへ push する。
+          # 毎回起点ブランチの最新コミットから作り直すので、前回の未マージ残骸は上書きする。
+          # --force ではなく --force-with-lease を使うが、守れる範囲は限定的である点に注意:
+          #   守れる  … 直下の fetch から push までの間に他の実行が割り込んだ場合（push が失敗する）
+          #   守れない… 前回実行より後・今回の fetch より前に積まれたコミット。これは fetch で
+          #             取得済みなのでリースが成立し、上書きされる。具体的には ci.yml の
+          #             visual-regression が PR ブランチへ自動コミットするベースライン画像が該当し、
+          #             設計上その日の再生成に任せる（このブランチは本ワークフロー専用のため）。
+          if git fetch --no-tags origin "$DATA_BRANCH"; then
+            # 更新ブランチが既にある場合は、いま見えている先端を上書き条件にする
+            remote_tip="$(git rev-parse FETCH_HEAD)"
+            git push --force-with-lease="refs/heads/$DATA_BRANCH:$remote_tip" \
+              origin "HEAD:refs/heads/$DATA_BRANCH"
           else
-            # コミットの著者を Actions ボット名義に設定する
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            # 更新した JSON をステージする
-            git add "$DATA_FILE"
-            # 一元管理した共通の件名でコミットする
-            git commit -m "$COMMIT_TITLE"
-
-            # 既定ブランチはブランチ保護で直 push できないため、専用の更新ブランチへ push する。
-            # 毎回起点ブランチの最新コミットから作り直すので、前回の未マージ残骸は上書きする。
-            # --force ではなく --force-with-lease を使うが、守れる範囲は限定的である点に注意:
-            #   守れる  … 直下の fetch から push までの間に他の実行が割り込んだ場合（push が失敗する）
-            #   守れない… 前回実行より後・今回の fetch より前に積まれたコミット。これは fetch で
-            #             取得済みなのでリースが成立し、上書きされる。具体的には ci.yml の
-            #             visual-regression が PR ブランチへ自動コミットするベースライン画像が該当し、
-            #             設計上その日の再生成に任せる（このブランチは本ワークフロー専用のため）。
-            if git fetch --no-tags origin "$DATA_BRANCH"; then
-              # 更新ブランチが既にある場合は、いま見えている先端を上書き条件にする
-              remote_tip="$(git rev-parse FETCH_HEAD)"
-              git push --force-with-lease="refs/heads/$DATA_BRANCH:$remote_tip" \
-                origin "HEAD:refs/heads/$DATA_BRANCH"
-            else
-              # 更新ブランチがまだ無い初回は、上書き対象が無いので通常の push で作成する
-              git push origin "HEAD:refs/heads/$DATA_BRANCH"
-            fi
-
-            # 後続ステップへ「変更あり」を伝える
-            echo "changed=true" >> "$GITHUB_OUTPUT"
+            # 更新ブランチがまだ無い初回は、上書き対象が無いので通常の push で作成する
+            git push origin "HEAD:refs/heads/$DATA_BRANCH"
           fi
 
       - name: Create pull request and enable auto-merge
-        # コミットを push した日だけ PR を扱う
-        if: steps.commit.outputs.changed == 'true'
+        # 前段が成功していれば必ず新しいコミットが push されている
+        # （generated_at が毎回変わるため「変更なし」で素通りする日は存在せず、
+        #   書き出しが無かった場合は前段が赤で止まる）。よって条件分岐は不要。
         env:
           # gh CLI の認証。checkout と同じ優先順位（PAT があれば PAT、無ければ GITHUB_TOKEN）。
           # GITHUB_TOKEN フォールバック時は、作成した PR で必須チェックが自動起動しない点に注意
@@ -313,26 +315,36 @@ jobs:
           # 途中の失敗を握り潰さず即座に止める（未定義変数・パイプ失敗も検出）
           set -euo pipefail
 
-          # 更新ブランチを head とする open な PR が既にあるか数える。
-          # 正常なら PR は当日のうちに auto-merge で閉じるので、ここで見つかるのは
-          # 「前回の PR が取り込まれないまま残っている」＝滞留のサインである。
-          open_prs="$(gh pr list --head "$DATA_BRANCH" --state open --json number --jq 'length')"
-          # 滞留していたかどうかを後で参照するために控える（PR 本体は下で更新／作成する）
-          stuck_pr="$open_prs"
+          # 更新ブランチを head とする open な PR を、作成時刻付きで取得する。
+          open_prs="$(gh pr list --head "$DATA_BRANCH" --state open --json createdAt)"
+          # open な PR の件数（0 なら新規作成が必要）
+          open_pr_count="$(echo "$open_prs" | jq 'length')"
+
+          # 「開いている」だけでは滞留と判断できない。日次実行の数分後に手動実行した場合、
+          # その日の PR はまだ必須チェック実行中で当然 open のままだからである
+          # （存在するだけで赤にすると、正常な再実行が毎回失敗する）。
+          # 実行間隔は 24 時間なので、それより十分短い STALE_PR_HOURS を超えて
+          # open なままの PR だけを「取り込まれていない」とみなす。
+          STALE_PR_HOURS=12
+          # 現在時刻から STALE_PR_HOURS 前を境界にして、それより古い PR を数える
+          stale_before="$(date -u -d "${STALE_PR_HOURS} hours ago" +%Y-%m-%dT%H:%M:%SZ)"
+          stale_prs="$(echo "$open_prs" | jq --arg t "$stale_before" '[.[] | select(.createdAt < $t)] | length')"
 
           # PR がまだ無ければ新規作成する（既にあれば先の push で内容は更新済み）
-          if [ "$open_prs" = "0" ]; then
+          if [ "$open_pr_count" = "0" ]; then
             # 起点ブランチ向けの PR を、コミットと同じ件名で ready（非 draft）として作成する
             if ! gh pr create \
               --base "$BASE_BRANCH" \
               --head "$DATA_BRANCH" \
               --title "$COMMIT_TITLE" \
               --body "日次スケジュールで再生成した $DATA_FILE の自動更新 PR。必須チェック通過後に auto-merge で取り込まれる（Update Portfolio Data ワークフローが作成）。"; then
-              # 代表的な原因は、PAT 未設定かつリポジトリ設定
-              # 「Allow GitHub Actions to create and approve pull requests」が無効なケース。
+              # 代表的な原因は 2 つあり、どちらかで案内先が変わるため両方を挙げる:
+              #   - PAGES_DEPLOY_TOKEN 未設定 … リポジトリ設定
+              #     「Allow GitHub Actions to create and approve pull requests」が無効だと拒否される
+              #   - PAGES_DEPLOY_TOKEN 設定済みだが権限不足 … push は通るが PR 作成が 403 になる
               # 更新ブランチは push 済みなので手動で PR を作れば取り込めるが、
               # 気づかないまま放置されないようジョブは赤で終わらせる。
-              echo "::error::PR を作成できませんでした。repo secret PAGES_DEPLOY_TOKEN を設定するか、リポジトリ設定の 'Allow GitHub Actions to create and approve pull requests' を有効にしてください。更新ブランチ $DATA_BRANCH は push 済みです。"
+              echo "::error::PR を作成できませんでした。PAGES_DEPLOY_TOKEN を設定している場合は contents: write に加えて pull-requests: write の権限があるか確認してください。未設定の場合はリポジトリ設定の 'Allow GitHub Actions to create and approve pull requests' を有効にするか、PAGES_DEPLOY_TOKEN を設定してください。更新ブランチ $DATA_BRANCH は push 済みです。"
               exit 1
             fi
           fi
@@ -342,30 +354,42 @@ jobs:
           # 必須チェックが無い等ですでに CLEAN な PR に対しては
           # "Pull request is in clean status" で失敗するため、--auto 一本槍にはできない。
           # GitHub 側の判定は PR 作成直後だと UNKNOWN（未計算）になり得るので、その間だけ待つ。
-          merge_attempts=5      # 判定待ちの最大試行回数
-          retry_wait=10         # 試行間隔（秒）
+          merge_attempts=10     # 判定待ちの最大試行回数
+          retry_wait=15         # 試行間隔（秒）。10 回 x 15 秒 = 最大約 135 秒待つ
           merge_arranged=false  # 取り込み（即時マージ or 予約）まで到達できたか
 
+          # マージ手配に失敗したときの案内。auto-merge も PR 作成と同様に
+          # リポジトリ設定（Allow auto-merge）が既定で無効なので、
+          # 生の gh エラーで止めずに原因と対処を出す。
+          merge_hint="::error::PR のマージを手配できませんでした。リポジトリ設定で auto-merge（Allow auto-merge）が有効か、トークンに pull-requests: write があるかを確認してください。更新ブランチと PR は最新の内容で残っているので、手動マージでも取り込めます。"
+
           for attempt in $(seq 1 "$merge_attempts"); do
-            # 現在のマージ可否状態を取得する
-            merge_state="$(gh pr view "$DATA_BRANCH" --json mergeStateStatus --jq '.mergeStateStatus')"
+            # 現在のマージ可否状態を取得する。gh 側の一時的な API エラー（502 等）で
+            # ステップごと落とさず、UNKNOWN と同じ「未計算」として再試行に回す。
+            merge_state="$(gh pr view "$DATA_BRANCH" --json mergeStateStatus --jq '.mergeStateStatus' || echo UNKNOWN)"
 
             case "$merge_state" in
               UNKNOWN)
-                # まだ計算中。次のループで取り直す（下の待機処理へ落ちる）
+                # まだ計算中（または取得に失敗）。次のループで取り直す
                 echo "マージ可否が未計算です（${attempt}/${merge_attempts}）"
                 ;;
               CLEAN)
                 # 待つべき条件が無い＝いま取り込める。そのまま squash マージする
                 # （ブランチ保護は API 側で評価されるため、保護を迂回することはない）
-                gh pr merge "$DATA_BRANCH" --squash
+                if ! gh pr merge "$DATA_BRANCH" --squash; then
+                  echo "$merge_hint"
+                  exit 1
+                fi
                 echo "必須チェック通過済みのため即時 squash マージしました"
                 merge_arranged=true
                 break
                 ;;
               *)
                 # BLOCKED / UNSTABLE など「チェック待ち」の状態。通過を条件に予約する
-                gh pr merge "$DATA_BRANCH" --auto --squash
+                if ! gh pr merge "$DATA_BRANCH" --auto --squash; then
+                  echo "$merge_hint"
+                  exit 1
+                fi
                 echo "auto-merge（squash）を予約しました（状態: ${merge_state}）"
                 merge_arranged=true
                 break
@@ -379,24 +403,28 @@ jobs:
             fi
           done
 
-          # 判定が UNKNOWN のままループを抜けた場合。PR とブランチは残るので人が
-          # マージすれば取り込めるが、旧実装が 22 日間気づかれず失敗し続けた轍を
-          # 踏まないよう、必ず赤で終わらせて通知させる
-          # （警告だけ出して緑で終えると「壊れている」と「正常」が区別できなくなる）。
+          # 判定が最後まで UNKNOWN だった場合は、状態を待たずに予約だけ試みる。
+          # mergeStateStatus の計算は GitHub 側の非同期処理で、混雑時は待ち時間を
+          # 超えることがある。そこで諦めて赤にすると、実際には正常な PR が丸一日
+          # 放置されてしまうため、最後に一度だけ楽観的に auto-merge を予約する。
           if [ "$merge_arranged" != "true" ]; then
-            echo "::error::PR のマージ可否が計算されませんでした。PR は残っているので手動マージでも取り込めます。"
-            exit 1
+            echo "マージ可否が計算されないまま待ち時間を使い切りました。auto-merge の予約だけ試みます"
+            if ! gh pr merge "$DATA_BRANCH" --auto --squash; then
+              echo "$merge_hint"
+              exit 1
+            fi
+            echo "auto-merge（squash）を予約しました（状態未計算のまま予約）"
           fi
 
           # 取り込みの手配自体は成功しても、それが実際に main へ入るとは限らない。
           # 代表例が PAGES_DEPLOY_TOKEN 未設定のケースで、GITHUB_TOKEN が起こした
           # イベントは他のワークフローを起動しないため PR の必須チェックが永久に走らず、
           # auto-merge の「予約」だけが成功して PR は BLOCKED のまま滞留する。
-          # この滞留はその日の実行時点では区別できないので、翌日の実行で検知する:
-          # 正常なら PR は当日中に閉じるため、実行開始時点で open な PR が残っていたら
-          # 前回分が取り込まれていない＝パイプラインが止まっているとみなして赤で知らせる。
+          # この滞留はその日の実行時点では区別できないので、後続の実行で検知する:
+          # 正常なら PR は数分で閉じるため、STALE_PR_HOURS を超えて open だった PR が
+          # あれば前回分が取り込まれていない＝パイプラインが止まっているとみなして赤で知らせる。
           # （ブランチと PR は最新の内容に更新済みなので、原因を直せばそのまま取り込める。）
-          if [ "$stuck_pr" != "0" ]; then
-            echo "::error::前回の更新 PR が取り込まれないまま残っていました。必須チェックが起動しているか（PAGES_DEPLOY_TOKEN 未設定だと起動しません）、auto-merge（Allow auto-merge）が有効かを確認してください。PR は今回の内容へ更新済みです。"
+          if [ "$stale_prs" != "0" ]; then
+            echo "::error::前回の更新 PR が ${STALE_PR_HOURS} 時間以上取り込まれずに残っていました。必須チェックが起動しているか（PAGES_DEPLOY_TOKEN 未設定だと起動しません）、auto-merge（Allow auto-merge）が有効かを確認してください。PR は今回の内容へ更新済みです。"
             exit 1
           fi

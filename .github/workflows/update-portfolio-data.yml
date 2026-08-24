@@ -287,6 +287,9 @@ jobs:
           # 書き出しが行われなかった異常を意味する。黙って成功扱いにすると
           # 「毎日実行されているのにデータが一切更新されない」状態が緑のまま続くので、
           # 何もしない分岐にはせず、原因を出して赤で止める。
+          # （このヘルパーは PR 作成ステップにも同じ内容で置いている。run: ブロックは
+          #   ステップごとに別のシェルなので関数を共有できないための重複であり、
+          #   注釈の解釈を防ぐ安全側の処理なので、変更するときは必ず両方そろえること。）
           # 外部由来の文字列（git / gh のエラー出力）を ::error:: 等の注釈に埋め込む前に
           # 無害化する。Actions は注釈中の % と改行をデコードし :: を区切りとして解釈するため、
           # そのまま貼ると表示が壊れたり、注釈が途中で終わって別の命令として読まれたりする。
@@ -322,7 +325,13 @@ jobs:
               echo "::error::起点ブランチの $DATA_FILE から generated_at を読めませんでした。ファイルが壊れている可能性があります。"
               exit 1
           fi
-          echo "base_generated_at=${base_generated_at}" >> "$GITHUB_OUTPUT"
+          # 値に改行が混じると 2 行目が別の出力として解釈され、sha 等を上書きできてしまう。
+          # 改行を含み得る値は区切り文字付きのヒアドキュメント形式で書き出す。
+          {
+              echo "base_generated_at<<GENERATED_AT_EOF"
+              printf '%s\n' "$base_generated_at"
+              echo "GENERATED_AT_EOF"
+          } >> "$GITHUB_OUTPUT"
 
           # コミットの著者を Actions ボット名義に設定する
           git config user.name "github-actions[bot]"
@@ -363,11 +372,17 @@ jobs:
                   exit 1
               fi
               remote_tip="$(git rev-parse FETCH_HEAD)"
-              git push --force-with-lease="refs/heads/$DATA_BRANCH:$remote_tip" \
-                  origin "HEAD:refs/heads/$DATA_BRANCH"
+              if ! git push --force-with-lease="refs/heads/$DATA_BRANCH:$remote_tip" \
+                  origin "HEAD:refs/heads/$DATA_BRANCH" 2>"$git_err"; then
+                  echo "::error::更新ブランチ $DATA_BRANCH への push に失敗しました: $(escape_annotation < "$git_err")"
+                  exit 1
+              fi
           elif [ "$remote_branch_status" -eq 2 ]; then
               # 更新ブランチがまだ無い初回は、上書き対象が無いので通常の push で作成する
-              git push origin "HEAD:refs/heads/$DATA_BRANCH"
+              if ! git push origin "HEAD:refs/heads/$DATA_BRANCH" 2>"$git_err"; then
+                  echo "::error::更新ブランチ $DATA_BRANCH の作成に失敗しました: $(escape_annotation < "$git_err")"
+                  exit 1
+              fi
           else
               # 通信エラー等。ブランチの有無が確定しないので push せずに止める（fail-closed）
               echo "::error::更新ブランチ $DATA_BRANCH の存在確認に失敗しました（git ls-remote 終了コード ${remote_branch_status}）: $(escape_annotation < "$git_err")"
@@ -418,6 +433,9 @@ jobs:
               echo "$@" >&2
           }
 
+          # （このヘルパーは PR 作成ステップにも同じ内容で置いている。run: ブロックは
+          #   ステップごとに別のシェルなので関数を共有できないための重複であり、
+          #   注釈の解釈を防ぐ安全側の処理なので、変更するときは必ず両方そろえること。）
           # 外部由来の文字列（git / gh のエラー出力）を ::error:: 等の注釈に埋め込む前に
           # 無害化する。Actions は注釈中の % と改行をデコードし :: を区切りとして解釈するため、
           # そのまま貼ると表示が壊れたり、注釈が途中で終わって別の命令として読まれたりする。
@@ -472,6 +490,13 @@ jobs:
                   exit 1
               fi
               files="$retry_output"
+              # 1 件も返らないのは「変更が無い」ではなく取得できていない状態
+              # （直前の force push 直後は差分の再計算中に空が返ることがある）。
+              # 空を「想定外なし」と読むと、範囲を確かめないまま取り込んでしまう。
+              if [ -z "$files" ]; then
+                  echo "::error::PR #${pr_number} の変更ファイル一覧が空でした。範囲を確認できないため取り込みを中止します。"
+                  exit 1
+              fi
               # 許可リストのいずれにも前方一致しないパスを拾う。
               # grep -F は部分一致なので使えない（"data/portfolio.json" が
               # "evil/data/portfolio.json" にも一致し、範囲外の変更を通してしまう）。
@@ -544,10 +569,16 @@ jobs:
                           merge_mode="auto"
                           return 0
                       fi
-                      # 実際にはもう取り込める状態だった場合に備えて即時マージも試す
-                      if gh pr merge "$pr_number" --squash; then
-                          merge_mode="immediate"
-                          return 0
+                      # 予約できないのは、読み取った状態が古く実際は取り込める場合がある。
+                      # ただし即時マージは CI の完了を待たないので、状態を読み直して
+                      # CLEAN であると確かめられたときだけに限る（UNSTABLE のまま
+                      # 押し込むと、走っているチェックを無視して取り込んでしまう）。
+                      if [ "$(read_pr_field mergeStateStatus)" = "CLEAN" ]; then
+                          echo "::warning::auto-merge を予約できなかったため、CLEAN であることを再確認して即時マージします。必須ステータスチェックの設定と auto-merge（Allow auto-merge）の有効化を確認してください。"
+                          if gh pr merge "$pr_number" --squash; then
+                              merge_mode="immediate"
+                              return 0
+                          fi
                       fi
                   fi
                   # 両方が同じ理由で失敗するなら設定不備なので、往復のたびには待たない。
@@ -596,6 +627,8 @@ jobs:
               if [ -z "$head" ]; then
                   return 1
               fi
+              # 前回の試行で控えた理由を持ち越さない（解消済みの障害を後段が誤って報告するため）
+              head_fetch_error=""
               # 同一コミットなら追加の問い合わせは不要
               if [ "$head" = "$PUSHED_SHA" ]; then
                   return 0
@@ -620,6 +653,18 @@ jobs:
                   ''|*[!0-9]*) return 1 ;;
                   *) return 0 ;;
               esac
+          }
+
+          # PR の 1 項目だけを読み取る。失敗しても呼び出し側を落とさず空文字を返す。
+          # `$(cmd || echo X)` の形は、部分出力が出てから失敗したときに
+          # 出力とフォールバックが連結して壊れた値になるため使わない。
+          read_pr_field() {
+              local out
+              if out="$(gh pr view "$pr_number" --json "$1" --jq ".$1")"; then
+                  printf '%s' "$out"
+              else
+                  printf ''
+              fi
           }
 
           # CLEAN（待ち条件なし）と確認できた PR を取り込む共通処理。
@@ -762,7 +807,7 @@ jobs:
                           # 設定されていない場合でもある。その場合 CI の完了を待たずに入るので、
                           # 意図した運用と食い違っていないか気づけるよう警告を出す
                           # （保護設定はリポジトリ側の判断なので赤にはしない）。
-                          merge_clean_pr "確認 ${clean_seen} 回目"
+                          merge_clean_pr "連続 2 回の確認"
                           merge_arranged=true
                           break
                           ;;
@@ -817,6 +862,16 @@ jobs:
               # （merge_state は「最後に読み取れた」状態で、読み取り失敗では上書きされない）。
               # DIRTY が続くなら本当に競合しているので、設定不備と誤解されない案内を出す。
               if [ "$merge_state" = "DIRTY" ]; then
+                  # 読み取りに失敗し続けた場合、この DIRTY はかなり古い可能性がある。
+                  # 競合として赤で止めるのは影響が大きいので、CLEAN と同様に読み直す。
+                  recheck="$(read_pr_field mergeStateStatus)"
+                  if [ -n "$recheck" ] && [ "$recheck" != "DIRTY" ]; then
+                      log "最後に読めた DIRTY は再確認で ${recheck} でした。手配を続けます"
+                      merge_state="$recheck"
+                  fi
+              fi
+
+              if [ "$merge_state" = "DIRTY" ]; then
                   echo "::error::更新 PR が起点ブランチと競合しています（mergeStateStatus=DIRTY）。$DATA_FILE を変更する別の変更が先に入った可能性があります。次回の実行は最新の $BASE_BRANCH から作り直すため通常は自動で解消しますが、解消しない場合は PR #${pr_number} を確認してください。"
                   exit 1
               fi
@@ -827,13 +882,13 @@ jobs:
                   # かなり古いことがある。取り込みは後戻りできないので、直前に読み直して
                   # いまも CLEAN であることを確かめてから動く（ループ内で 1 回の観測を
                   # 信用しないのと同じ理由）。
-                  recheck="$(gh pr view "$pr_number" --json mergeStateStatus --jq '.mergeStateStatus' || echo UNKNOWN)"
+                  recheck="$(read_pr_field mergeStateStatus)"
                   if [ "$recheck" = "CLEAN" ]; then
                       merge_clean_pr "最終確認"
                       merge_arranged=true
                   else
-                      log "最後に読めた CLEAN は再確認で ${recheck} でした。予約に切り替えます"
-                      merge_state="$recheck"
+                      log "最後に読めた CLEAN は再確認で ${recheck:-取得失敗} でした。予約に切り替えます"
+                      merge_state="${recheck:-UNKNOWN}"
                   fi
               fi
           fi
@@ -883,6 +938,12 @@ jobs:
                   '($t | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) < (now - $h * 3600)' \
                   2>/dev/null || echo "false")"
               if [ "$data_is_stale" = "true" ]; then
-                  echo "::warning::$BASE_BRANCH の $DATA_FILE が ${STALE_DATA_HOURS} 時間以上更新されていません（最終: ${MERGED_GENERATED_AT}）。更新 PR の手配自体は成功しているので、必須チェックが失敗し続けている・auto-merge が成立していない・このワークフローを直したばかりで前回までの停止が残っている、のいずれかです。PR #${pr_number} の状態を確認してください。"
+                  echo "::error::$BASE_BRANCH の $DATA_FILE が ${STALE_DATA_HOURS} 時間以上更新されていません（最終: ${MERGED_GENERATED_AT}）。更新 PR の手配自体は成功しているので、必須チェックが失敗し続けている・auto-merge が成立していない・このワークフローを直した直後で前回までの停止が残っている、のいずれかです。PR #${pr_number} の状態を確認してください。"
+                  # 警告では気づけない。スケジュール実行の失敗通知は「赤」にしか届かず、
+                  # 緑のまま何日もデータが止まる状態こそ本 PR が無くそうとしたものなので、
+                  # 手配が成功していてもここは赤で終わらせる。
+                  # （この検知は成果物そのものを見ているので誤検知しない。直した直後の
+                  #   1 回だけは前回までの停止を反映して赤になるが、取り込まれれば緑に戻る。）
+                  exit 1
               fi
           fi

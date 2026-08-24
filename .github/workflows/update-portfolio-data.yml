@@ -278,8 +278,20 @@ jobs:
           # 書き出しが行われなかった異常を意味する。黙って成功扱いにすると
           # 「毎日実行されているのにデータが一切更新されない」状態が緑のまま続くので、
           # 何もしない分岐にはせず、原因を出して赤で止める。
-          if git diff --quiet -- "$DATA_FILE"; then
+          # git diff --quiet は「差分なし=0 / 差分あり=1」だが、それ以外の値は
+          # git 自体のエラー（壊れた index、参照できないパス等）を意味する。
+          # 2 値の真偽として扱うと、エラーを「差分あり」と読んで commit へ進み、
+          # 「nothing to commit」という無関係な生エラーで落ちるため、明示的に分ける。
+          set +e
+          git diff --quiet -- "$DATA_FILE"
+          diff_status=$?
+          set -e
+
+          if [ "$diff_status" -eq 0 ]; then
               echo "::error::$DATA_FILE が更新されていません。generated_at は毎回変わるはずなので、前段のデータ生成が書き出しに失敗している可能性があります。"
+              exit 1
+          elif [ "$diff_status" -ne 1 ]; then
+              echo "::error::$DATA_FILE の差分確認に失敗しました（git diff 終了コード ${diff_status}）。"
               exit 1
           fi
 
@@ -370,21 +382,69 @@ jobs:
           # 「一時的な API エラーを再試行する」ことは目的が違うので別々に持つ。
           state_attempts=8   # マージ可否・PR 先端の反映待ち（最大 8 回）
           state_wait=15      # 状態待ちの間隔（秒）
-          api_retries=3      # 単発 API 呼び出しの一時エラー再試行（設定不備は繰り返しても直らない）
-          api_wait=10        # API 再試行の間隔（秒）
+          api_retries=3      # 読み取り系 API の一時エラー再試行（設定不備は繰り返しても直らない）
+          api_wait=10        # 再試行の間隔（秒）
+          merge_rounds=2     # マージ手配（2 方式の往復）の再試行回数
 
-          # 与えられたコマンドを、一時的な失敗なら少し待って数回だけ再試行する共通処理。
-          # 恒常的な設定不備（権限・リポジトリ設定）は繰り返しても直らないので回数は控えめ。
-          # 成否は戻り値で返し、どう扱うか（案内文・中止するか）は呼び出し側が決める。
-          retry() {
+          # 標準出力を返すコマンドを、一時的な失敗なら少し待って数回だけ再試行する。
+          # 結果は変数 retry_output に入れて返す（$( ) で包むと、失敗した試行が
+          # 途中まで出した出力と成功した試行の出力が連結してしまうため）。
+          retry_output=""
+          retry_capture() {
               local try
               for try in $(seq 1 "$api_retries"); do
-                  if "$@"; then
+                  # 各試行の出力は毎回上書きし、前の試行の残骸が混ざらないようにする
+                  if retry_output="$("$@")"; then
                       return 0
                   fi
                   # 最終試行の後は待たない（実行しない再試行を告知しない）
                   if [ "$try" -lt "$api_retries" ]; then
-                      log "操作に失敗しました（${try}/${api_retries}）。${api_wait} 秒後に再試行します"
+                      log "取得に失敗しました（${try}/${api_retries}）。${api_wait} 秒後に再試行します"
+                      sleep "$api_wait"
+                  fi
+              done
+              retry_output=""
+              return 1
+          }
+
+          # PR を取り込む。読み取ったマージ可否は次の瞬間には変わり得るので、
+          # 想定した方式が拒否されたらもう一方の方式も試す:
+          #   即時マージ（--squash）    … 待ち条件が無い PR にしか通らない
+          #   予約（--auto --squash）  … 逆に、すでに条件を満たした PR には掛けられない
+          # 片方しか試さないと、判定と実行の間の状態変化だけで 1 日分の更新を落とす。
+          # 恒常的な設定不備なら両方とも同じように失敗するので、往復を数回で打ち切る。
+          #   $1 … 先に試す方式（immediate / auto）
+          merge_pr() {
+              local primary="$1"
+              local round
+              for round in $(seq 1 "$merge_rounds"); do
+                  if [ "$primary" = "immediate" ]; then
+                      # 取り込める状態と読めたので、まず即時マージを試す
+                      if gh pr merge "$pr_number" --squash; then
+                          merge_mode="immediate"
+                          return 0
+                      fi
+                      # 実際にはまだ条件待ちだった場合に備えて予約も試す
+                      if gh pr merge "$pr_number" --auto --squash; then
+                          merge_mode="auto"
+                          return 0
+                      fi
+                  else
+                      # まだ条件待ちと読めたので、まず予約を試す
+                      if gh pr merge "$pr_number" --auto --squash; then
+                          merge_mode="auto"
+                          return 0
+                      fi
+                      # 実際にはもう取り込める状態だった場合に備えて即時マージも試す
+                      if gh pr merge "$pr_number" --squash; then
+                          merge_mode="immediate"
+                          return 0
+                      fi
+                  fi
+                  # 両方が同じ理由で失敗するなら設定不備なので、往復のたびには待たない。
+                  # 一時的なエラーの可能性だけ拾えれば十分なので短く 1 回だけ空ける。
+                  if [ "$round" -lt "$merge_rounds" ]; then
+                      log "マージの手配に失敗しました（${round}/${merge_rounds}）。${api_wait} 秒後に再試行します"
                       sleep "$api_wait"
                   fi
               done
@@ -409,6 +469,30 @@ jobs:
                        '[.[] | select(.headRepositoryOwner.login == $owner)] | .[0].number // empty'
           }
 
+          # PR の先端が「この実行で push したコミットを含んでいる」かを判定する。
+          # 完全一致にしないのは、更新ブランチへ正当に別のコミットが積まれることがあるため
+          # （ci.yml の visual-regression がベースライン画像を PR ブランチへ自動コミットする）。
+          # 一致だけを条件にすると、そうした日は永遠に追いつかず誤って赤になる。
+          # 見たいのは「古い内容のまま取り込まれないこと」なので、包含していれば十分。
+          pr_head_contains_pushed() {
+              local head="$1"
+              # まだ読めていない場合は追いついていない扱い
+              if [ -z "$head" ]; then
+                  return 1
+              fi
+              # 同一コミットなら追加の問い合わせは不要
+              if [ "$head" = "$PUSHED_SHA" ]; then
+                  return 0
+              fi
+              # 別コミットの場合はローカルに無いことがあるので取得を試みる
+              if ! git fetch --no-tags --quiet origin "$head" 2>/dev/null; then
+                  # 取得できなければ包含関係を確かめられないので、安全側に倒して未達とする
+                  return 1
+              fi
+              # push したコミットが PR 先端の祖先なら、内容は含まれている
+              git merge-base --is-ancestor "$PUSHED_SHA" "$head"
+          }
+
           # PR 番号として妥当か（数字だけか）を確かめる。URL の解析結果をそのまま
           # 後段へ渡すと、想定外の出力だったときに「反映待ちのタイムアウト」など
           # 見当違いの失敗として現れるため、ここで弾く。
@@ -421,24 +505,28 @@ jobs:
 
           # 既存の PR を探す。一時的な API エラーで 1 日分の更新を落とさないよう再試行し、
           # それでも駄目なら原因を明示して止める（生の gh エラーだけで終わらせない）。
-          pr_list_output=""
-          if ! pr_list_output="$(retry own_open_pr_number)"; then
+          if ! retry_capture own_open_pr_number; then
               echo "::error::open な更新 PR の一覧を取得できませんでした。更新ブランチ $DATA_BRANCH は push 済みなので、PR を手動で作成・マージすれば取り込めます。"
               exit 1
           fi
-          pr_number="$pr_list_output"
+          pr_number="$retry_output"
 
           if [ -z "$pr_number" ]; then
               # 起点ブランチ向けの PR を、コミットと同じ件名で ready（非 draft）として作成する。
               # gh pr create は作成した PR の URL を標準出力に出す。
+              # 標準エラーは混ぜずに別ファイルへ流す。混ぜると gh の警告行などが
+              # 標準出力の URL の後ろに付き、末尾を切り出す番号の解析が壊れる。
+              create_err="$(mktemp)"
               create_output=""
               if create_output="$(gh pr create \
                   --base "$BASE_BRANCH" \
                   --head "$DATA_BRANCH" \
                   --title "$COMMIT_TITLE" \
-                  --body "日次スケジュールで再生成した $DATA_FILE の自動更新 PR。必須チェック通過後に auto-merge で取り込まれる（Update Portfolio Data ワークフローが作成）。" 2>&1)"; then
-                  # URL の末尾が PR 番号（例: https://github.com/owner/repo/pull/123）
-                  pr_number="${create_output##*/}"
+                  --body "日次スケジュールで再生成した $DATA_FILE の自動更新 PR。必須チェック通過後に auto-merge で取り込まれる（Update Portfolio Data ワークフローが作成）。" 2>"$create_err")"; then
+                  # URL の末尾が PR 番号（例: https://github.com/owner/repo/pull/123）。
+                  # 出力が複数行でも最後の行だけを見る
+                  pr_number="$(printf '%s' "$create_output" | tail -n 1)"
+                  pr_number="${pr_number##*/}"
                   log "PR #${pr_number} を作成しました"
               else
                   # 一覧に出ていなくても PR が既にある場合がある（作成直後の反映遅れ、
@@ -452,7 +540,7 @@ jobs:
                       #   - PAGES_DEPLOY_TOKEN 設定済みだが権限不足 … push は通るが PR 作成が 403 になる
                       # 更新ブランチは push 済みなので手動で PR を作れば取り込めるが、
                       # 気づかないまま放置されないようジョブは赤で終わらせる。
-                      echo "::error::PR を作成できませんでした（gh の出力: ${create_output}）。PAGES_DEPLOY_TOKEN を設定している場合は contents: write に加えて pull-requests: write の権限があるか確認してください。未設定の場合はリポジトリ設定の 'Allow GitHub Actions to create and approve pull requests' を有効にするか、PAGES_DEPLOY_TOKEN を設定してください。更新ブランチ $DATA_BRANCH は push 済みです。"
+                      echo "::error::PR を作成できませんでした（gh の出力: $(tr '\n' ' ' < "$create_err"))。PAGES_DEPLOY_TOKEN を設定している場合は contents: write に加えて pull-requests: write の権限があるか確認してください。未設定の場合はリポジトリ設定の 'Allow GitHub Actions to create and approve pull requests' を有効にするか、PAGES_DEPLOY_TOKEN を設定してください。更新ブランチ $DATA_BRANCH は push 済みです。"
                       exit 1
                   fi
                   log "PR の作成は失敗しましたが、既存の PR #${pr_number} が見つかったため再利用します"
@@ -483,12 +571,19 @@ jobs:
           # 先端を確認するのは、push 直後は GitHub 側の反映が遅れ、古い先端・古いマージ可否が
           # 返ることがあるため。確認せずに進むと前日の内容に対する判定で当日の内容を取り込みかねない。
           for attempt in $(seq 1 "$state_attempts"); do
-              # 一時的な API エラーでステップごと落とさず、「未確定」として待ち直す
+              # 一時的な API エラーでステップごと落とさず、「読めなかった」として待ち直す。
+              # 読めなかった場合に merge_state を UNKNOWN で上書きしてしまうと、
+              # それまでに観測した DIRTY（競合）が消えて、競合したまま緑で終わってしまう。
+              # そのため読み取り失敗は専用の値にし、直前の観測結果を壊さない。
               pr_info="$(gh pr view "$pr_number" --json headRefOid,mergeStateStatus || echo '{}')"
               pr_head="$(echo "$pr_info" | jq -r '.headRefOid // empty')"
-              merge_state="$(echo "$pr_info" | jq -r '.mergeStateStatus // "UNKNOWN"')"
+              if [ -n "$pr_head" ]; then
+                  merge_state="$(echo "$pr_info" | jq -r '.mergeStateStatus // "UNKNOWN"')"
+              else
+                  log "PR の状態を取得できませんでした（${attempt}/${state_attempts}）"
+              fi
 
-              if [ "$pr_head" != "$PUSHED_SHA" ]; then
+              if ! pr_head_contains_pushed "$pr_head"; then
                   # 先端がまだ追いついていない間は、マージ可否の値も古いので判断しない
                   log "PR の先端が push 済みコミットに追いついていません（${attempt}/${state_attempts}）"
               else
@@ -503,13 +598,12 @@ jobs:
                           # 意図した運用と食い違っていないか気づけるよう警告を出す
                           # （保護設定はリポジトリ側の判断なので赤にはしない）。
                           echo "::warning::PR が待ち条件なし（CLEAN）で取り込み可能でした。必須ステータスチェックが設定されていない場合、CI の完了を待たずにマージされます。ブランチ保護の必須チェック設定を確認してください。"
-                          if ! retry gh pr merge "$pr_number" --squash; then
-                              echo "::error::${hint_squash}"
+                          if ! merge_pr immediate; then
+                              echo "::error::${hint_squash} ${hint_auto}"
                               exit 1
                           fi
-                          log "取り込み可能だったため即時 squash マージしました"
+                          log "取り込みを手配しました（方式: ${merge_mode}）"
                           merge_arranged=true
-                          merge_mode="immediate"
                           break
                           ;;
                       UNKNOWN|DIRTY)
@@ -520,13 +614,12 @@ jobs:
                       *)
                           # BLOCKED / UNSTABLE / BEHIND など「まだ入れられない」状態。
                           # 条件が整い次第の取り込みを予約する
-                          if ! retry gh pr merge "$pr_number" --auto --squash; then
-                              echo "::error::${hint_auto}"
+                          if ! merge_pr auto; then
+                              echo "::error::${hint_auto} ${hint_squash}"
                               exit 1
                           fi
-                          log "auto-merge（squash）を予約しました（状態: ${merge_state}）"
+                          log "取り込みを手配しました（状態: ${merge_state} / 方式: ${merge_mode}）"
                           merge_arranged=true
-                          merge_mode="auto"
                           break
                           ;;
                   esac
@@ -545,7 +638,8 @@ jobs:
           fi
 
           if [ "$merge_arranged" != "true" ]; then
-              # ここへ来るのは最後まで UNKNOWN か DIRTY だった場合。
+              # ここへ来るのは最後まで UNKNOWN か DIRTY だった場合
+              # （merge_state は「最後に読み取れた」状態で、読み取り失敗では上書きされない）。
               # DIRTY が続くなら本当に競合しているので、設定不備と誤解されない案内を出す。
               if [ "$merge_state" = "DIRTY" ]; then
                   echo "::error::更新 PR が起点ブランチと競合しています（mergeStateStatus=DIRTY）。$DATA_FILE を変更する別の変更が先に入った可能性があります。次回の実行は最新の $BASE_BRANCH から作り直すため通常は自動で解消しますが、解消しない場合は PR #${pr_number} を確認してください。"
@@ -557,16 +651,11 @@ jobs:
               # 予約（--auto）は「すでに CLEAN な PR」には掛けられないため、
               # 失敗したら即時マージも試してから諦める（状態が読めていないので両方あり得る）。
               log "マージ可否が計算されないまま待ち時間を使い切りました。取り込みの手配だけ試みます"
-              if retry gh pr merge "$pr_number" --auto --squash; then
-                  log "auto-merge（squash）を予約しました（状態未計算のまま予約）"
-                  merge_mode="auto"
-              elif retry gh pr merge "$pr_number" --squash; then
-                  log "即時 squash マージしました（状態未計算のまま実行）"
-                  merge_mode="immediate"
-              else
-                  echo "::error::${hint_auto} なお即時マージも試しましたが失敗しました: ${hint_squash}"
+              if ! merge_pr auto; then
+                  echo "::error::${hint_auto} ${hint_squash}"
                   exit 1
               fi
+              log "取り込みを手配しました（状態未計算のまま / 方式: ${merge_mode}）"
           fi
 
           # PAT が無い構成では、GITHUB_TOKEN が起こしたイベントが他のワークフローを
@@ -584,8 +673,10 @@ jobs:
           # 「復旧しつつある」を区別できず誤検知するので、成果物の側から確かめる:
           # 起点ブランチの generated_at が何日も更新されていなければ、手配が緑でも
           # データは届いていない。実行間隔は 1 日なので、余裕を見て 2 日を閾値にする。
+          # 即時マージできた日は、この実行でデータが取り込まれているため確認不要
+          # （起点ブランチの値は実行開始時点のもので、この実行の結果を反映しない）。
           STALE_DATA_HOURS=48
-          if [ -n "$MERGED_GENERATED_AT" ]; then
+          if [ "$merge_mode" != "immediate" ] && [ -n "$MERGED_GENERATED_AT" ]; then
               # 起点ブランチのデータが古すぎないかを判定する（時刻計算は移植性のため jq で行う）。
               # generated_at は JavaScript の toISOString() 由来でミリ秒を含む
               # （例: 2026-08-02T21:43:22.448Z）。jq の fromdateiso8601 は秒までしか
@@ -598,6 +689,6 @@ jobs:
                   '($t | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) < (now - $h * 3600)' \
                   2>/dev/null || echo "false")"
               if [ "$data_is_stale" = "true" ]; then
-                  echo "::warning::$BASE_BRANCH の $DATA_FILE が ${STALE_DATA_HOURS} 時間以上更新されていません（最終: ${MERGED_GENERATED_AT}）。更新 PR の手配は成功しているため、必須チェックが失敗し続けているか auto-merge が成立していない可能性があります。PR #${pr_number} の状態を確認してください。"
+                  echo "::warning::$BASE_BRANCH の $DATA_FILE が ${STALE_DATA_HOURS} 時間以上更新されていません（最終: ${MERGED_GENERATED_AT}）。更新 PR の手配自体は成功しているので、必須チェックが失敗し続けている・auto-merge が成立していない・このワークフローを直したばかりで前回までの停止が残っている、のいずれかです。PR #${pr_number} の状態を確認してください。"
               fi
           fi

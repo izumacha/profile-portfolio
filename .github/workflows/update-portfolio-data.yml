@@ -48,6 +48,13 @@ env:
   DATA_FILE: data/portfolio.json
   # コミット件名と PR タイトルに使う共通の文言（従来のコミットメッセージを踏襲）
   COMMIT_TITLE: "chore: refresh portfolio self-proof data"
+  # 自動マージしてよい変更パスの許可リスト（1 行 1 パターン）。
+  # このワークフローが作る差分は DATA_FILE だけだが、更新ブランチには ci.yml の
+  # visual-regression が不足していたベースライン画像を自動コミットすることがあるため
+  # そのディレクトリも許す。ここに無いパスが混ざった PR は自動で取り込まない。
+  MERGEABLE_PATHS: |
+    data/portfolio.json
+    e2e/visual.spec.ts-snapshots/
 
 jobs:
   update-data:
@@ -56,7 +63,8 @@ jobs:
       - name: Checkout
         # サードパーティアクションは可変タグでなく commit SHA に固定する（サプライチェーン整合性 / issue #16）。
         # SHA は同リポジトリ内の他ワークフロー（ci.yml / lighthouse.yml / update-snapshots.yml）が
-        # 既に固定している v4.2.2 の commit と同一。バージョンは行末コメントで併記する。
+        # 固定しているものと同一。対応バージョンは行末コメントを唯一の表記とする
+        # （本文にも版を書くと、更新時に片方だけ古くなり、どちらが正か分からなくなるため）。
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # 取得するブランチを既定ブランチに固定する。
@@ -101,7 +109,7 @@ jobs:
 
       - name: Build data/portfolio.json
         # サードパーティアクションは可変タグでなく commit SHA に固定する（サプライチェーン整合性 / issue #16）。
-        # SHA は actions/github-script の v7 タグ（= v7.1.0）が指す実コミット。バージョンは行末コメントで併記する。
+        # 対応バージョンは行末コメントを唯一の表記とする（本文には版を書かない）。
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
@@ -407,6 +415,25 @@ jobs:
               return 1
           }
 
+          # 取り込もうとしている PR の変更パスが許可リストの範囲に収まっているかを確かめる。
+          # 先端の判定を「push したコミットを含むこと」に緩めた結果、更新ブランチに
+          # 積まれた別のコミットも squash マージに巻き込まれ得る。データ更新という
+          # 件名で無関係な変更が main へ入らないよう、範囲を明示的に区切る。
+          assert_changed_files_allowed() {
+              local files unexpected
+              # 変更パスの一覧を取得する。取れなければ範囲を確かめられないので中止する
+              if ! files="$(gh pr view "$pr_number" --json files --jq '.files[].path')"; then
+                  echo "::error::PR #${pr_number} の変更ファイル一覧を取得できませんでした。範囲を確認できないため取り込みを中止します。"
+                  exit 1
+              fi
+              # 許可リストのいずれの行にも前方一致しないパスを拾う
+              unexpected="$(echo "$files" | grep -v -F -f <(echo "$MERGEABLE_PATHS" | sed '/^[[:space:]]*$/d') || true)"
+              if [ -n "$unexpected" ]; then
+                  echo "::error::PR #${pr_number} に想定外の変更が含まれています: $(echo "$unexpected" | tr '\n' ' ')。データ更新として自動マージできないため中止します。更新ブランチ $DATA_BRANCH の内容を確認してください。"
+                  exit 1
+              fi
+          }
+
           # PR を取り込む。読み取ったマージ可否は次の瞬間には変わり得るので、
           # 想定した方式が拒否されたらもう一方の方式も試す:
           #   即時マージ（--squash）    … 待ち条件が無い PR にしか通らない
@@ -417,6 +444,8 @@ jobs:
           merge_pr() {
               local primary="$1"
               local round
+              # 取り込む前に、変更範囲が想定どおりかを必ず確かめる
+              assert_changed_files_allowed
               for round in $(seq 1 "$merge_rounds"); do
                   if [ "$primary" = "immediate" ]; then
                       # 取り込める状態と読めたので、まず即時マージを試す
@@ -516,7 +545,9 @@ jobs:
               # gh pr create は作成した PR の URL を標準出力に出す。
               # 標準エラーは混ぜずに別ファイルへ流す。混ぜると gh の警告行などが
               # 標準出力の URL の後ろに付き、末尾を切り出す番号の解析が壊れる。
+              # 一時ファイルはステップ終了時に片付ける
               create_err="$(mktemp)"
+              trap 'rm -f "$create_err"' EXIT
               create_output=""
               if create_output="$(gh pr create \
                   --base "$BASE_BRANCH" \
@@ -532,7 +563,10 @@ jobs:
                   # 一覧に出ていなくても PR が既にある場合がある（作成直後の反映遅れ、
                   # あるいは base を付け替えられた PR など）。その場合 gh は
                   # "already exists" を返すので、権限の問題と決めつけずに拾い直す。
-                  pr_number="$(own_open_pr_number || echo "")"
+                  pr_number=""
+                  if retry_capture own_open_pr_number; then
+                      pr_number="$retry_output"
+                  fi
                   if [ -z "$pr_number" ]; then
                       # 代表的な原因は 2 つあり、どちらかで案内先が変わるため両方を挙げる:
                       #   - PAGES_DEPLOY_TOKEN 未設定 … リポジトリ設定
@@ -566,6 +600,8 @@ jobs:
           merge_arranged=false  # 取り込み（即時マージ or 予約）まで到達できたか
           merge_mode=""         # どちらで手配したか（immediate=即マージ / auto=条件付き予約）
           merge_state="UNKNOWN" # 直近に読み取ったマージ可否状態（ループ後の分岐で使う）
+          pr_read_ok=false      # PR の状態を一度でも読めたか（読めない＝API 側の問題と区別する）
+          clean_seen=0          # CLEAN を連続で観測した回数（取り込みは 2 回目から）
 
           # PR の先端とマージ可否を 1 回の API 呼び出しでまとめて取得し、状態が整うまで待つ。
           # 先端を確認するのは、push 直後は GitHub 側の反映が遅れ、古い先端・古いマージ可否が
@@ -575,10 +611,22 @@ jobs:
               # 読めなかった場合に merge_state を UNKNOWN で上書きしてしまうと、
               # それまでに観測した DIRTY（競合）が消えて、競合したまま緑で終わってしまう。
               # そのため読み取り失敗は専用の値にし、直前の観測結果を壊さない。
-              pr_info="$(gh pr view "$pr_number" --json headRefOid,mergeStateStatus || echo '{}')"
-              pr_head="$(echo "$pr_info" | jq -r '.headRefOid // empty')"
-              if [ -n "$pr_head" ]; then
+              # 応答が途中で切れると壊れた JSON になる。`|| echo '{}'` で継ぎ足すと
+              # 部分出力と連結してさらに壊れ、jq の parse error で set -e により
+              # ステップごと落ちてしまう（待ち直しにも案内にも到達しない）。
+              # そこで一度そのまま受け取り、JSON として読めるかを確かめてから使う。
+              pr_info="$(gh pr view "$pr_number" --json headRefOid,mergeStateStatus || true)"
+              if ! echo "$pr_info" | jq -e . >/dev/null 2>&1; then
+                  pr_info=""
+              fi
+
+              pr_head=""
+              if [ -n "$pr_info" ]; then
+                  pr_head="$(echo "$pr_info" | jq -r '.headRefOid // empty')"
+                  # 読めたときだけ状態を更新する（読み取り失敗で観測済みの DIRTY を消さない）
                   merge_state="$(echo "$pr_info" | jq -r '.mergeStateStatus // "UNKNOWN"')"
+                  # 一度でも読めたことを記録し、後段で「取得できなかった」と区別する
+                  pr_read_ok=true
               else
                   log "PR の状態を取得できませんでした（${attempt}/${state_attempts}）"
               fi
@@ -591,6 +639,19 @@ jobs:
                   head_synced=true
                   case "$merge_state" in
                       CLEAN)
+                          # CLEAN は取り込みが後戻りできないので、1 回の観測では動かない。
+                          # PR 作成直後は必須チェックがまだ PR に紐づいておらず、
+                          # 一瞬だけ「待ち条件なし」に見えることがある。そこで即マージすると
+                          # CI が始まる前に取り込んでしまう（UNKNOWN / DIRTY を待ち直すのと同じ理由）。
+                          # 連続して 2 回 CLEAN を観測できたときだけ本物とみなす。
+                          if [ "$clean_seen" -lt 1 ]; then
+                              clean_seen=1
+                              log "待ち条件なし（CLEAN）と読めましたが、確定待ちのため再確認します（${attempt}/${state_attempts}）"
+                              if [ "$attempt" -lt "$state_attempts" ]; then
+                                  sleep "$state_wait"
+                              fi
+                              continue
+                          fi
                           # 待つべき条件が無い＝いま取り込める。そのまま squash マージする
                           # （ブランチ保護は API 側で評価されるため、保護を迂回することはない）。
                           # ただし PR 作成直後に CLEAN になるのは、必須ステータスチェックが
@@ -607,11 +668,15 @@ jobs:
                           break
                           ;;
                       UNKNOWN|DIRTY)
+                          # CLEAN の連続観測は途切れたので数え直す
+                          clean_seen=0
                           # UNKNOWN はまだ計算中。DIRTY は競合だが、push 直後は反映前の
                           # 古い判定が返ることがあるため、どちらも確定とみなさず待ち直す。
                           log "マージ可否が確定していません（状態: ${merge_state} / ${attempt}/${state_attempts}）"
                           ;;
                       *)
+                          # CLEAN の連続観測は途切れたので数え直す
+                          clean_seen=0
                           # BLOCKED / UNSTABLE / BEHIND など「まだ入れられない」状態。
                           # 条件が整い次第の取り込みを予約する
                           if ! merge_pr auto; then
@@ -633,7 +698,13 @@ jobs:
 
           # 先端が最後まで一致しなかった場合は、古い内容を取り込む危険があるので中止する。
           if [ "$head_synced" != "true" ]; then
-              echo "::error::PR #${pr_number} の先端が push したコミット（${PUSHED_SHA}）に一致しません。取り込むと古い内容をマージする恐れがあるため中止します。"
+              if [ "$pr_read_ok" != "true" ]; then
+                  # 一度も読めていない＝内容の問題ではなく API 側の問題。
+                  # 「先端が一致しない」と報告すると、正しいブランチを疑わせてしまう。
+                  echo "::error::PR #${pr_number} の状態を一度も取得できませんでした。トークンの有効期限や GitHub API の状況を確認してください。更新ブランチ $DATA_BRANCH は push 済みです。"
+                  exit 1
+              fi
+              echo "::error::PR #${pr_number} の先端が push したコミット（${PUSHED_SHA}）を含んでいません。取り込むと古い内容をマージする恐れがあるため中止します。"
               exit 1
           fi
 

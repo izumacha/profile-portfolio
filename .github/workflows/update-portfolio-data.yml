@@ -4,6 +4,11 @@ name: Update Portfolio Data
 # 各リポジトリの GitHub API から取得し、data/portfolio.json に焼き込んでコミットする。
 # ブラウザは生成済みの静的 JSON を fetch するだけなので、サイト側はノービルドのまま。
 # （このワークフロー内のスクリプトはサイトの成果物ではないため no-build 原則に抵触しない）
+#
+# main はブランチ保護（PR 必須＋必須ステータスチェック）により直 push できないため、
+# 更新コミットは専用ブランチへ push し、PR の作成＋auto-merge 設定で main へ取り込む。
+# （直 push 方式は 2026-08-03 以降 "push declined due to repository rule violations" で
+#   連日失敗していた。保護を弱めるのではなくワークフロー側を保護に適合させる。）
 
 on:
   # 日次で自動更新（UTC 21:00 = JST 翌 06:00）
@@ -13,13 +18,22 @@ on:
   workflow_dispatch:
 
 # GITHUB_TOKEN の権限（最小権限）。
-# - contents: write … data/portfolio.json をコミット/プッシュするため
+# - contents: write … data/portfolio.json のコミットを更新ブランチへプッシュするため
 # - actions: read   … listWorkflowRuns* で各リポジトリの CI 実行を読むため。
 #   未指定スコープは `none` に倒れるため、これが無いと CI 取得が全 repo で失敗し
 #   「CI 情報なし」/ stale 扱いになってしまう（Codex 指摘 P1）。
+# - pull-requests: write … 更新ブランチから main への PR 作成と auto-merge 設定のため
 permissions:
   contents: write
   actions: read
+  pull-requests: write
+
+# ワークフロー全体で使う定数（マジック文字列の一元管理）
+env:
+  # 更新コミットを積む専用ブランチ。毎回 main 起点で作り直すため force push する
+  DATA_BRANCH: automation/update-portfolio-data
+  # コミット件名と PR タイトルに使う共通の文言（従来のコミットメッセージを踏襲）
+  COMMIT_TITLE: "chore: refresh portfolio self-proof data"
 
 jobs:
   update-data:
@@ -31,11 +45,15 @@ jobs:
         # 既に固定している v4.2.2 の commit と同一。バージョンは行末コメントで併記する。
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # push に使うトークン。PAGES_DEPLOY_TOKEN（PAT / GitHub App トークン）があればそれを使う。
-          # 理由: 既定の GITHUB_TOKEN による push は GitHub Pages の再ビルドをトリガーしないため、
-          # スケジュール更新が人手の publish まで未公開になり得る（Codex 指摘 P1）。
-          # PAT/App トークンで push すれば「ユーザー操作」とみなされ Pages が自動再ビルドされる。
-          # 未設定なら GITHUB_TOKEN にフォールバックする（fail-safe: 公開は遅れるがワークフローは壊れない）。
+          # push / PR 操作に使うトークン。PAGES_DEPLOY_TOKEN（PAT / GitHub App トークン）があればそれを使う。
+          # 理由 1: 既定の GITHUB_TOKEN が起こしたイベントは他のワークフローをトリガーしない。
+          #         GITHUB_TOKEN で更新ブランチを push / PR 作成すると PR の必須ステータスチェック
+          #         （CI / Lighthouse）が走らず、auto-merge が永久に待ちになる。
+          # 理由 2: GITHUB_TOKEN による push は GitHub Pages の再ビルドもトリガーしないため、
+          #         マージ後の公開が人手の publish まで遅れ得る（Codex 指摘 P1）。
+          # PAT/App トークンなら「ユーザー操作」とみなされ、PR の CI も Pages 再ビルドも自動で動く。
+          # 未設定なら GITHUB_TOKEN にフォールバックする（fail-safe: PR は作られるので、CI の起動と
+          # マージを人が行えば取り込める。ワークフロー自体は壊れない）。
           token: ${{ secrets.PAGES_DEPLOY_TOKEN || secrets.GITHUB_TOKEN }}
           # 後段の git push がこの checkout の認証情報を再利用できるように残す（既定 true だが明示）。
           persist-credentials: true
@@ -199,22 +217,58 @@ jobs:
             fs.writeFileSync(path, JSON.stringify(out, null, 2) + "\n");
             core.info("data/portfolio.json を更新しました");
 
-      - name: Commit if changed
+      - name: Commit to update branch if changed
+        # 後続の PR 作成ステップが「コミットしたか」を参照できるように id を付ける
+        id: commit
         run: |
+          # 途中の失敗を握り潰さず即座に止める（未定義変数・パイプ失敗も検出）
+          set -euo pipefail
           # generated_at は毎回変わるため、それ以外に差分があるかを判定する。
           # ただし簡潔さを優先し data/portfolio.json 全体の差分有無で判定する。
           if git diff --quiet -- data/portfolio.json; then
+            # 差分が無い日はコミットも PR も作らない
             echo "差分なし: コミットをスキップします"
+            # 後続ステップへ「変更なし」を伝える
+            echo "changed=false" >> "$GITHUB_OUTPUT"
           else
+            # コミットの著者を Actions ボット名義に設定する
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
+            # 更新した JSON をステージする
             git add data/portfolio.json
-            git commit -m "chore: refresh portfolio self-proof data"
-            # checkout で設定したトークン（PAGES_DEPLOY_TOKEN または GITHUB_TOKEN）で push する。
-            # PAGES_DEPLOY_TOKEN（PAT/App トークン）が設定済みなら push が Pages 再ビルドを起こし即時公開、
-            # 未設定（GITHUB_TOKEN フォールバック）なら Pages は自動再ビルドされず、手動 publish か
-            # Actions ベースの Pages デプロイ（actions/deploy-pages）まで未公開のままになる。
-            # 利用者は repo secret に PAGES_DEPLOY_TOKEN（contents:write 権限の PAT 等）を設定すれば
-            # スケジュール更新が自動公開される。
-            git push origin HEAD:${{ github.ref_name }}
+            # 一元管理した共通の件名でコミットする
+            git commit -m "$COMMIT_TITLE"
+            # main はブランチ保護で直 push できないため、専用の更新ブランチへ push する。
+            # 毎回 main の最新コミット起点で作り直すため、前回の未マージ残骸があっても
+            # 上書きできるよう force push する（このブランチは本ワークフロー専用）。
+            git push --force origin "HEAD:refs/heads/$DATA_BRANCH"
+            # 後続ステップへ「変更あり」を伝える
+            echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Create pull request and enable auto-merge
+        # コミットを push した日だけ PR を扱う
+        if: steps.commit.outputs.changed == 'true'
+        env:
+          # gh CLI の認証。checkout と同じ優先順位（PAT があれば PAT、無ければ GITHUB_TOKEN）。
+          # GITHUB_TOKEN フォールバック時は、作成した PR で必須チェックが自動起動しない点に注意
+          # （checkout ステップのコメント参照。その場合は人が CI を起動しマージする）。
+          GH_TOKEN: ${{ secrets.PAGES_DEPLOY_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          # 途中の失敗を握り潰さず即座に止める（未定義変数・パイプ失敗も検出）
+          set -euo pipefail
+          # 更新ブランチを head とする open な PR が既にあるか数える（前日分が未マージのケース）
+          open_prs="$(gh pr list --head "$DATA_BRANCH" --state open --json number --jq 'length')"
+          # PR がまだ無ければ新規作成する（既にあれば先の force push で内容は更新済み）
+          if [ "$open_prs" = "0" ]; then
+            # main 向けの PR を、コミットと同じ件名で ready（非 draft）として作成する
+            gh pr create \
+              --base main \
+              --head "$DATA_BRANCH" \
+              --title "$COMMIT_TITLE" \
+              --body "日次スケジュールで再生成した data/portfolio.json の自動更新 PR。必須チェック通過後に auto-merge で取り込まれる（Update Portfolio Data ワークフローが作成）。"
+          fi
+          # 必須ステータスチェックの通過を条件に自動マージ（squash）を予約する。
+          # リポジトリ設定で auto-merge が無効な場合などは失敗するが、PR 自体は残るので
+          # 警告を出して続行する（fail-safe: 人がマージすれば取り込める）。
+          gh pr merge "$DATA_BRANCH" --auto --squash || echo "::warning::auto-merge を設定できませんでした。PR を手動でマージしてください。"

@@ -426,10 +426,30 @@ jobs:
                   echo "::error::PR #${pr_number} の変更ファイル一覧を取得できませんでした。範囲を確認できないため取り込みを中止します。"
                   exit 1
               fi
-              # 許可リストのいずれの行にも前方一致しないパスを拾う
-              unexpected="$(echo "$files" | grep -v -F -f <(echo "$MERGEABLE_PATHS" | sed '/^[[:space:]]*$/d') || true)"
+              # 許可リストのいずれにも前方一致しないパスを拾う。
+              # grep -F は部分一致なので使えない（"data/portfolio.json" が
+              # "evil/data/portfolio.json" にも一致し、範囲外の変更を通してしまう）。
+              # 先頭からの一致であることが要なので case で明示的に前方一致を見る。
+              unexpected=""
+              while IFS= read -r changed_path; do
+                  # 空行は無視する
+                  [ -n "$changed_path" ] || continue
+                  path_allowed=false
+                  while IFS= read -r allowed_prefix; do
+                      # 許可リスト側の空行も無視する
+                      [ -n "$allowed_prefix" ] || continue
+                      # 完全一致、またはその前置き（ディレクトリ配下）なら許可
+                      case "$changed_path" in
+                          "$allowed_prefix"|"$allowed_prefix"*) path_allowed=true; break ;;
+                      esac
+                  done <<< "$MERGEABLE_PATHS"
+                  # どの許可にも当たらなかったパスを控える
+                  if [ "$path_allowed" != "true" ]; then
+                      unexpected="${unexpected}${changed_path} "
+                  fi
+              done <<< "$files"
               if [ -n "$unexpected" ]; then
-                  echo "::error::PR #${pr_number} に想定外の変更が含まれています: $(echo "$unexpected" | tr '\n' ' ')。データ更新として自動マージできないため中止します。更新ブランチ $DATA_BRANCH の内容を確認してください。"
+                  echo "::error::PR #${pr_number} に想定外の変更が含まれています: ${unexpected}。データ更新として自動マージできないため中止します。更新ブランチ $DATA_BRANCH の内容を確認してください。"
                   exit 1
               fi
           }

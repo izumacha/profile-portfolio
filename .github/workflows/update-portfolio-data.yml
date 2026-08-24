@@ -48,12 +48,13 @@ env:
   DATA_FILE: data/portfolio.json
   # コミット件名と PR タイトルに使う共通の文言（従来のコミットメッセージを踏襲）
   COMMIT_TITLE: "chore: refresh portfolio self-proof data"
-  # 自動マージしてよい変更パスの許可リスト（1 行 1 パターン）。
-  # このワークフローが作る差分は DATA_FILE だけだが、更新ブランチには ci.yml の
-  # visual-regression が不足していたベースライン画像を自動コミットすることがあるため
-  # そのディレクトリも許す。ここに無いパスが混ざった PR は自動で取り込まない。
-  MERGEABLE_PATHS: |
-    data/portfolio.json
+  # 自動マージしてよい変更パスのうち、DATA_FILE 以外に許すもの（1 行 1 パターン）。
+  # 末尾が / のものはそのディレクトリ配下を、それ以外は完全一致だけを許す。
+  # DATA_FILE 自身はここに書かず実行時に足す（同じパスを 2 箇所に書くと、
+  # 片方だけ変えたときに毎日の更新が「想定外の変更」で止まるため。§6 一元管理）。
+  # 更新ブランチには ci.yml の visual-regression が不足していたベースライン画像を
+  # 自動コミットすることがあるため、そのディレクトリを許可する。
+  MERGEABLE_EXTRA_PATHS: |
     e2e/visual.spec.ts-snapshots/
 
 jobs:
@@ -286,6 +287,13 @@ jobs:
           # 書き出しが行われなかった異常を意味する。黙って成功扱いにすると
           # 「毎日実行されているのにデータが一切更新されない」状態が緑のまま続くので、
           # 何もしない分岐にはせず、原因を出して赤で止める。
+          # 外部由来の文字列（git / gh のエラー出力）を ::error:: 等の注釈に埋め込む前に
+          # 無害化する。Actions は注釈中の % と改行をデコードし :: を区切りとして解釈するため、
+          # そのまま貼ると表示が壊れたり、注釈が途中で終わって別の命令として読まれたりする。
+          escape_annotation() {
+              sed -e 's/%/%25/g' -e 's/\r/%0D/g' -e 's/::/%3A%3A/g' | tr '\n' ' '
+          }
+
           # git diff --quiet は「差分なし=0 / 差分あり=1」だが、それ以外の値は
           # git 自体のエラー（壊れた index、参照できないパス等）を意味する。
           # 2 値の真偽として扱うと、エラーを「差分あり」と読んで commit へ進み、
@@ -308,7 +316,13 @@ jobs:
           # 「手配は成功しているのにデータが届いていない」状態を成果物の側から
           # 判定するのに使う（PR の状態から推測すると誤検知するため）。
           # HEAD はまだ起点ブランチのコミットなので、その時点の内容を読む。
-          echo "base_generated_at=$(git show "HEAD:$DATA_FILE" | jq -r '.generated_at // empty')" >> "$GITHUB_OUTPUT"
+          # コマンド置換を echo の引数に直接書くと、失敗しても errexit が働かず
+          # 空文字が書き込まれて鮮度警告が静かに無効化される。いったん変数で受ける。
+          if ! base_generated_at="$(git show "HEAD:$DATA_FILE" | jq -r '.generated_at // empty')"; then
+              echo "::error::起点ブランチの $DATA_FILE から generated_at を読めませんでした。ファイルが壊れている可能性があります。"
+              exit 1
+          fi
+          echo "base_generated_at=${base_generated_at}" >> "$GITHUB_OUTPUT"
 
           # コミットの著者を Actions ボット名義に設定する
           git config user.name "github-actions[bot]"
@@ -332,14 +346,22 @@ jobs:
           # 「初回だからブランチが無い」と誤判定し、force でない push が
           # non-fast-forward で拒否されて生の git エラーで落ちる）。
           # --exit-code は 一致あり=0 / 一致なし=2 を返し、それ以外は本当のエラー。
+          # 失敗時の原因（認証切れ・DNS 障害など）を捨てないよう stderr を控える
+          git_err="$(mktemp)"
+          trap 'rm -f "$git_err"' EXIT
           set +e
-          git ls-remote --exit-code --heads origin "$DATA_BRANCH" >/dev/null 2>&1
+          git ls-remote --exit-code --heads origin "$DATA_BRANCH" >/dev/null 2>"$git_err"
           remote_branch_status=$?
           set -e
 
           if [ "$remote_branch_status" -eq 0 ]; then
-              # 更新ブランチが既にある場合は、いま見えている先端を上書き条件にする
-              git fetch --no-tags origin "$DATA_BRANCH"
+              # 更新ブランチが既にある場合は、いま見えている先端を上書き条件にする。
+              # 取得の失敗も生の git エラーで終わらせず、原因を名指しして止める
+              # （ls-remote を挟んだのと同じ理由。ここだけ素通しでは意味がない）。
+              if ! git fetch --no-tags origin "$DATA_BRANCH" 2>"$git_err"; then
+                  echo "::error::更新ブランチ $DATA_BRANCH の取得に失敗しました: $(escape_annotation < "$git_err")"
+                  exit 1
+              fi
               remote_tip="$(git rev-parse FETCH_HEAD)"
               git push --force-with-lease="refs/heads/$DATA_BRANCH:$remote_tip" \
                   origin "HEAD:refs/heads/$DATA_BRANCH"
@@ -348,7 +370,7 @@ jobs:
               git push origin "HEAD:refs/heads/$DATA_BRANCH"
           else
               # 通信エラー等。ブランチの有無が確定しないので push せずに止める（fail-closed）
-              echo "::error::更新ブランチ $DATA_BRANCH の存在確認に失敗しました（git ls-remote 終了コード ${remote_branch_status}）。ネットワークまたは認証の問題の可能性があります。"
+              echo "::error::更新ブランチ $DATA_BRANCH の存在確認に失敗しました（git ls-remote 終了コード ${remote_branch_status}）: $(escape_annotation < "$git_err")"
               exit 1
           fi
 
@@ -386,6 +408,14 @@ jobs:
               echo "$@" >&2
           }
 
+          # 外部由来の文字列（git / gh のエラー出力）を ::error:: 等の注釈に埋め込む前に
+          # 無害化する。Actions は注釈中の % と改行をデコードし :: を区切りとして解釈するため、
+          # そのまま貼ると表示が壊れたり、注釈が途中で終わって別の命令として読まれたりする。
+          escape_annotation() {
+              sed -e 's/%/%25/g' -e 's/\r/%0D/g' -e 's/::/%3A%3A/g' | tr '\n' ' '
+          }
+
+
           # 待ち時間の設定。「GitHub 側の状態が整うのを待つ」ことと
           # 「一時的な API エラーを再試行する」ことは目的が違うので別々に持つ。
           state_attempts=8   # マージ可否・PR 先端の反映待ち（最大 8 回）
@@ -420,12 +450,16 @@ jobs:
           # 積まれた別のコミットも squash マージに巻き込まれ得る。データ更新という
           # 件名で無関係な変更が main へ入らないよう、範囲を明示的に区切る。
           assert_changed_files_allowed() {
-              local files unexpected
-              # 変更パスの一覧を取得する。取れなければ範囲を確かめられないので中止する
-              if ! files="$(gh pr view "$pr_number" --json files --jq '.files[].path')"; then
+              local files unexpected changed_path allowed_entry path_allowed mergeable_paths
+              # 許可リストは DATA_FILE と追加分を実行時に連結して作る（二重管理を避ける）
+              mergeable_paths="$(printf '%s\n%s\n' "$DATA_FILE" "$MERGEABLE_EXTRA_PATHS")"
+              # 変更パスの一覧を取得する。取れなければ範囲を確かめられないので中止するが、
+              # 一時的な API エラーで 1 日分の更新を落とさないよう他の読み取りと同じく再試行する
+              if ! retry_capture gh pr view "$pr_number" --json files --jq '.files[].path'; then
                   echo "::error::PR #${pr_number} の変更ファイル一覧を取得できませんでした。範囲を確認できないため取り込みを中止します。"
                   exit 1
               fi
+              files="$retry_output"
               # 許可リストのいずれにも前方一致しないパスを拾う。
               # grep -F は部分一致なので使えない（"data/portfolio.json" が
               # "evil/data/portfolio.json" にも一致し、範囲外の変更を通してしまう）。
@@ -435,14 +469,28 @@ jobs:
                   # 空行は無視する
                   [ -n "$changed_path" ] || continue
                   path_allowed=false
-                  while IFS= read -r allowed_prefix; do
+                  while IFS= read -r allowed_entry; do
                       # 許可リスト側の空行も無視する
-                      [ -n "$allowed_prefix" ] || continue
-                      # 完全一致、またはその前置き（ディレクトリ配下）なら許可
-                      case "$changed_path" in
-                          "$allowed_prefix"|"$allowed_prefix"*) path_allowed=true; break ;;
+                      [ -n "$allowed_entry" ] || continue
+                      case "$allowed_entry" in
+                          */)
+                              # 末尾が / の項目はディレクトリ。その配下だけを許可する
+                              case "$changed_path" in
+                                  "$allowed_entry"*) path_allowed=true ;;
+                              esac
+                              ;;
+                          *)
+                              # それ以外はファイル。前方一致にすると
+                              # "data/portfolio.json" が "data/portfolio.jsonEVIL/x.js" にも
+                              # 当たってしまうため、完全一致だけを許可する
+                              if [ "$changed_path" = "$allowed_entry" ]; then
+                                  path_allowed=true
+                              fi
+                              ;;
                       esac
-                  done <<< "$MERGEABLE_PATHS"
+                      # どれかに当たった時点で次のパスへ
+                      [ "$path_allowed" = "true" ] && break
+                  done <<< "$mergeable_paths"
                   # どの許可にも当たらなかったパスを控える
                   if [ "$path_allowed" != "true" ]; then
                       unexpected="${unexpected}${changed_path} "
@@ -736,6 +784,20 @@ jobs:
                   echo "::error::更新 PR が起点ブランチと競合しています（mergeStateStatus=DIRTY）。$DATA_FILE を変更する別の変更が先に入った可能性があります。次回の実行は最新の $BASE_BRANCH から作り直すため通常は自動で解消しますが、解消しない場合は PR #${pr_number} を確認してください。"
                   exit 1
               fi
+              # 最終試行で初めて CLEAN を読んだ場合は、確認回数が足りずここへ来る。
+              # 「計算されなかった」わけではないので、CLEAN として扱い警告も出す。
+              if [ "$merge_state" = "CLEAN" ]; then
+                  echo "::warning::PR が待ち条件なし（CLEAN）で取り込み可能でした。必須ステータスチェックが設定されていない場合、CI の完了を待たずにマージされます。ブランチ保護の必須チェック設定を確認してください。"
+                  if ! merge_pr immediate; then
+                      echo "::error::${hint_squash} ${hint_auto}"
+                      exit 1
+                  fi
+                  log "取り込みを手配しました（最終確認で CLEAN / 方式: ${merge_mode}）"
+                  merge_arranged=true
+              fi
+          fi
+
+          if [ "$merge_arranged" != "true" ]; then
               # UNKNOWN のままなら、状態を待たずに手配だけ試みる。
               # マージ可否の計算は GitHub 側の非同期処理で、混雑時は待ち時間を超えることがある。
               # そこで諦めて赤にすると、実際には正常な PR が丸一日放置されてしまう。

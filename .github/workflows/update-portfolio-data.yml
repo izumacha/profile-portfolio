@@ -492,7 +492,7 @@ jobs:
           # 積まれた別のコミットも squash マージに巻き込まれ得る。データ更新という
           # 件名で無関係な変更が main へ入らないよう、範囲を明示的に区切る。
           assert_changed_files_allowed() {
-              local files unexpected changed_path allowed_entry path_allowed mergeable_paths
+              local files unexpected changed_path allowed_entry path_allowed mergeable_paths files_try
               # 許可リストは DATA_FILE と追加分を実行時に連結して作る（二重管理を避ける）
               mergeable_paths="$(printf '%s\n%s\n' "$DATA_FILE" "$MERGEABLE_EXTRA_PATHS")"
               # 変更パスの一覧を取得する。取れなければ範囲を確かめられないので中止するが、
@@ -503,16 +503,27 @@ jobs:
               # rename では filename に変更後のパスしか出ないため、変更元 previous_filename も
               # 検査対象に含める（保護対象 → 許可ディレクトリへの rename が「想定内」として
               # 素通りし、保護対象の削除が main へ入るのを防ぐ。両パスとも許可内であること）。
-              if ! retry_capture gh api --paginate "repos/${REPO_FULL_NAME}/pulls/${pr_number}/files" --jq '.[] | .filename, (.previous_filename // empty)'; then
-                  echo "::error::PR #${pr_number} の変更ファイル一覧を取得できませんでした。範囲を確認できないため取り込みを中止します。"
-                  exit 1
-              fi
-              files="$retry_output"
+              #
               # 1 件も返らないのは「変更が無い」ではなく取得できていない状態
-              # （直前の force push 直後は差分の再計算中に空が返ることがある）。
-              # 空を「想定外なし」と読むと、範囲を確かめないまま取り込んでしまう。
+              # （直前の force push 直後は、差分の再計算中に 200 と空配列が返ることがある）。
+              # このときコマンド自体は成功するため、終了コードだけを見る retry_capture では
+              # 再試行に入らず、1 回目の空でそのまま中止＝その日の更新を落としてしまう。
+              # 空も失敗とみなして数回待ち直し、それでも空なら範囲を確かめられないので中止する。
+              files=""
+              for files_try in $(seq 1 "$api_retries"); do
+                  if retry_output="$(gh api --paginate "repos/${REPO_FULL_NAME}/pulls/${pr_number}/files" \
+                      --jq '.[] | .filename, (.previous_filename // empty)')" && [ -n "$retry_output" ]; then
+                      files="$retry_output"
+                      break
+                  fi
+                  # 最終試行の後は待たない（実行しない再試行を告知しない）
+                  if [ "$files_try" -lt "$api_retries" ]; then
+                      log "変更ファイル一覧を取得できませんでした（${files_try}/${api_retries}）。${api_wait} 秒後に再試行します"
+                      sleep "$api_wait"
+                  fi
+              done
               if [ -z "$files" ]; then
-                  echo "::error::PR #${pr_number} の変更ファイル一覧が空でした。範囲を確認できないため取り込みを中止します。"
+                  echo "::error::PR #${pr_number} の変更ファイル一覧を取得できませんでした（空のまま）。範囲を確認できないため取り込みを中止します。"
                   exit 1
               fi
               # 許可リストのいずれにも前方一致しないパスを拾う。
@@ -763,6 +774,24 @@ jobs:
                   pr_number=""
                   if retry_capture own_open_pr_number; then
                       pr_number="$retry_output"
+                  fi
+                  # own_open_pr_number は base で絞って探すため、同じ head の PR が
+                  # 別の base へ向いている（誰かが付け替えた等）と永遠に見つからない。
+                  # その状態では gh は "already exists" を返し続けるので、下の
+                  # トークン・権限を疑う案内を毎日出しながら永久に止まってしまう。
+                  # base を外して探し直し、見つかったら実態に即して報告する。
+                  if [ -z "$pr_number" ]; then
+                      other_base_pr="$(gh pr list \
+                          --head "$DATA_BRANCH" \
+                          --state open \
+                          --json number,baseRefName,headRepositoryOwner,headRepository \
+                          | jq -r --arg owner "$REPO_OWNER" --arg repo "$REPO_NAME" \
+                               '[.[] | select(.headRepositoryOwner.login == $owner and .headRepository.name == $repo)]
+                                | .[0] | select(. != null) | "#\(.number)（base: \(.baseRefName)）"' || echo "")"
+                      if [ -n "$other_base_pr" ]; then
+                          echo "::error::更新ブランチ $DATA_BRANCH の PR ${other_base_pr} が $BASE_BRANCH 以外へ向いているため、新しい PR を作成できません。base を $BASE_BRANCH に戻すか、その PR を閉じてください。"
+                          exit 1
+                      fi
                   fi
                   if [ -z "$pr_number" ]; then
                       # 代表的な原因は 2 つあり、どちらかで案内先が変わるため両方を挙げる:

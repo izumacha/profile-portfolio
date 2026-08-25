@@ -586,13 +586,22 @@ jobs:
           # リポジトリの書き込み権限者（= main の保護を管理できる側）に限られるため、
           # 予約経路のこの隙間は受け入れている制約としてここに明記する。
           merge_immediate() {
-              if [ -n "${pr_head:-}" ]; then
-                  # 検証済みの先端に固定してマージする
-                  gh pr merge "$pr_number" --squash --match-head-commit "$pr_head"
-              else
-                  # 先端をまだ読めていない経路（状態未計算のまま手配する場合）は固定できない
-                  gh pr merge "$pr_number" --squash
+              # 直近の読み取りが失敗し続けていると pr_head が空のままここへ来る
+              # （head_synced を立てた後に読めなくなった場合や、状態未計算のまま
+              #   手配へ回った場合）。固定なしで押し込むと、下の --match-head-commit が
+              #   閉じているはずの隙間（検査からマージまでに割り込んだコミットを
+              #   検査せずに巻き込む）がそのまま開くので、まず読み直す。
+              if [ -z "${pr_head:-}" ]; then
+                  pr_head="$(read_pr_field headRefOid)"
               fi
+              if [ -z "$pr_head" ]; then
+                  # 読み直しても分からないなら固定できない。押し込まずに見送り、
+                  # 呼び出し側の予約経路へ回す（fail-closed）。
+                  log "PR の先端を読み取れず即時マージを固定できないため、この方式は見送ります"
+                  return 1
+              fi
+              # 検証済みの先端に固定してマージする
+              gh pr merge "$pr_number" --squash --match-head-commit "$pr_head"
           }
 
           # PR を取り込む。読み取ったマージ可否は次の瞬間には変わり得るので、
@@ -685,7 +694,10 @@ jobs:
           # シェル変数へ書いても呼び出し側には伝わらない。ファイル越しなら伝わるので、
           # 上の fetch_err と同じ方式で受け渡す。
           changed_files_err="$(mktemp)"
-          trap 'rm -f "$fetch_err" "$changed_files_err" "${create_err:-}"' EXIT
+          # 鮮度判定（jq）が失敗した理由を控える場所。他の外部コマンドと同じく
+          # stderr を捨てず、何が起きたかを注釈に載せられるようにする。
+          stale_err="$(mktemp)"
+          trap 'rm -f "$fetch_err" "$changed_files_err" "$stale_err" "${create_err:-}"' EXIT
 
           # PR の先端が「この実行で push したコミットを含んでいる」かを判定する。
           # 完全一致にしないのは、更新ブランチへ正当に別のコミットが積まれることがあるため
@@ -885,6 +897,11 @@ jobs:
           merge_state="UNKNOWN" # 直近に読み取ったマージ可否状態（ループ後の分岐で使う）
           pr_read_ok=false      # PR の状態を一度でも読めたか（読めない＝API 側の問題と区別する）
           clean_seen=0          # CLEAN を連続で観測した回数（取り込みは 2 回目から）
+          # 最後に読めた先端（pr_head は試行ごとに空へ戻すため、最終試行だけ読めないと
+          # 消えてしまう）。ループ後の報告で「一度も読めなかった」のか「読めた先端が
+          # 追いついていなかった」のかを取り違えないために別に持つ。
+          # マージの固定には使わない（固定には今この瞬間の値が要るため pr_head を使う）。
+          last_pr_head=""
 
           # PR の先端とマージ可否を 1 回の API 呼び出しでまとめて取得し、状態が整うまで待つ。
           # 先端を確認するのは、push 直後は GitHub 側の反映が遅れ、古い先端・古いマージ可否が
@@ -906,6 +923,10 @@ jobs:
               pr_head=""
               if [ -n "$pr_info" ]; then
                   pr_head="$(echo "$pr_info" | jq -r '.headRefOid // empty')"
+                  # 読めた先端は別に控える（後段の報告で最後に読めた値を使うため）
+                  if [ -n "$pr_head" ]; then
+                      last_pr_head="$pr_head"
+                  fi
                   # 読めたときだけ状態を更新する（読み取り失敗で観測済みの DIRTY を消さない）
                   merge_state="$(echo "$pr_info" | jq -r '.mergeStateStatus // "UNKNOWN"')"
                   # 一度でも読めたことを記録し、後段で「取得できなかった」と区別する
@@ -987,15 +1008,16 @@ jobs:
                   echo "::error::PR #${pr_number} の先端コミットを取得できませんでした: ${head_fetch_error}"
                   exit 1
               fi
-              if [ -z "${pr_head:-}" ]; then
-                  # 最後の試行で PR を読めておらず、比べる先端そのものが手元に無い。
-                  # 途中で一度でも読めていれば pr_read_ok は true になるため上の分岐は通らず、
-                  # このまま下へ落とすと「含んでいません」＝内容が古いと報告してしまい、
-                  # 実際は API 側が不安定なだけなのにブランチの中身を疑わせてしまう。
-                  echo "::error::PR #${pr_number} の先端を最後まで読み取れませんでした。取り込む内容が今回 push したものか確かめられないため中止します。GitHub API の状況を確認してください。更新ブランチ $DATA_BRANCH は push 済みです。"
+              if [ -z "$last_pr_head" ]; then
+                  # 一度も先端を読めておらず、比べる相手そのものが手元に無い。
+                  # ここで「含んでいません」＝内容が古いと報告すると、実際は API 側が
+                  # 不安定なだけなのにブランチの中身を疑わせてしまう。
+                  # （pr_head ではなく last_pr_head で見るのは、最終試行だけ読めなかった
+                  #   ケースを「一度も読めなかった」と取り違えないため。）
+                  echo "::error::PR #${pr_number} の先端を一度も読み取れませんでした。取り込む内容が今回 push したものか確かめられないため中止します。GitHub API の状況を確認してください。更新ブランチ $DATA_BRANCH は push 済みです。"
                   exit 1
               fi
-              echo "::error::PR #${pr_number} の先端（${pr_head}）が push したコミット（${PUSHED_SHA}）を含んでいません。取り込むと古い内容をマージする恐れがあるため中止します。"
+              echo "::error::PR #${pr_number} の先端（最後に読めた値: ${last_pr_head}）が push したコミット（${PUSHED_SHA}）を含んでいません。取り込むと古い内容をマージする恐れがあるため中止します。"
               exit 1
           fi
 
@@ -1067,27 +1089,33 @@ jobs:
           # 即時マージできた日は、この実行でデータが取り込まれているため確認不要
           # （起点ブランチの値は実行開始時点のもので、この実行の結果を反映しない）。
           STALE_DATA_HOURS=48
-          if [ "$merge_mode" != "immediate" ] && [ -n "$MERGED_GENERATED_AT" ]; then
+          if [ "$merge_mode" != "immediate" ]; then
+              # 判定材料そのものが無い場合。前段（Commit to update branch）は空を赤で
+              # 弾くのでここへは来ない想定だが、来たときに黙って素通りすると、この検知
+              # だけが無言で止まる＝下で潰している「緑のままデータが止まる」状態になる。
+              if [ -z "$MERGED_GENERATED_AT" ]; then
+                  echo "::error::$BASE_BRANCH の $DATA_FILE から generated_at を受け取れていないため、データの鮮度を確認できません。更新 PR の手配自体は成功しています。前段の出力受け渡しを確認してください。"
+                  exit 1
+              fi
               # 起点ブランチのデータが古すぎないかを判定する（時刻計算は移植性のため jq で行う）。
               # generated_at は JavaScript の toISOString() 由来でミリ秒を含む
               # （例: 2026-08-02T21:43:22.448Z）。jq の fromdateiso8601 は秒までしか
               # 解釈できずエラーになるため、小数部を落としてから渡す。
-              # 判定自体が失敗しても、鮮度の通知のために更新そのものは失敗させない。
-              # ただし黙って「新しい」と読んではいけない: generated_at が解釈できない形
-              # （手で編集された・生成側の書式が変わった等）になると、この検知が二度と
-              # 発火しないまま緑が続き、下のコメントが無くそうとしている「緑のまま
-              # データが止まる」状態そのものになる。判定できなかったことは警告で必ず見せる。
               # `$(cmd || echo X)` の形は使わない（部分出力とフォールバックが連結して
               # 壊れた値になるため。read_pr_field のコメント参照）。
-              data_is_stale=""
               if ! data_is_stale="$(jq -rn \
                   --arg t "$MERGED_GENERATED_AT" \
                   --argjson h "$STALE_DATA_HOURS" \
                   '($t | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) < (now - $h * 3600)' \
-                  2>/dev/null)"; then
-                  # 途中まで出力されていた値が残っていると誤判定するので捨てる
-                  data_is_stale=""
-                  echo "::warning::$BASE_BRANCH の $DATA_FILE の鮮度を判定できませんでした（generated_at: $(printf '%s' "$MERGED_GENERATED_AT" | escape_annotation)）。値が ISO 8601 の想定どおりか確認してください。判定できない間はデータ停止を検知できません。"
+                  2>"$stale_err")"; then
+                  # 判定できない＝この安全網が外れている、ということ。generated_at が
+                  # 解釈できない形（手で編集された・生成側の書式が変わった等）になると、
+                  # 以降この検知は二度と発火しない。それを警告で流すと、下のコメントの
+                  # とおりスケジュール実行では誰にも届かず、緑のままデータが止まる状態に
+                  # 戻ってしまうので、停止を検知したときと同じく赤で終わらせる。
+                  # （手配自体は上で済んでおり、赤にしても取り込みは妨げない。）
+                  echo "::error::$BASE_BRANCH の $DATA_FILE の鮮度を判定できませんでした（generated_at: $(printf '%s' "$MERGED_GENERATED_AT" | escape_annotation)）: $(escape_annotation < "$stale_err")。値が ISO 8601 の想定どおりか確認してください。判定できない間はデータ停止を検知できません。"
+                  exit 1
               fi
               if [ "$data_is_stale" = "true" ]; then
                   echo "::error::$BASE_BRANCH の $DATA_FILE が ${STALE_DATA_HOURS} 時間以上更新されていません（最終: ${MERGED_GENERATED_AT}）。更新 PR の手配自体は成功しているので、必須チェックが失敗し続けている・auto-merge が成立していない・このワークフローを直した直後で前回までの停止が残っている、のいずれかです。PR #${pr_number} の状態を確認してください。"

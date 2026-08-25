@@ -287,7 +287,7 @@ jobs:
           # 書き出しが行われなかった異常を意味する。黙って成功扱いにすると
           # 「毎日実行されているのにデータが一切更新されない」状態が緑のまま続くので、
           # 何もしない分岐にはせず、原因を出して赤で止める。
-          # （このヘルパーは PR 作成ステップにも同じ内容で置いている。run: ブロックは
+          # （このヘルパーは "Create pull request and enable auto-merge" ステップにも同じ内容で置いている。run: ブロックは
           #   ステップごとに別のシェルなので関数を共有できないための重複であり、
           #   注釈の解釈を防ぐ安全側の処理なので、変更するときは必ず両方そろえること。）
           # 外部由来の文字列（git / gh のエラー出力）を ::error:: 等の注釈に埋め込む前に
@@ -378,7 +378,13 @@ jobs:
                   echo "::error::更新ブランチ $DATA_BRANCH の取得に失敗しました: $(escape_annotation < "$git_err")"
                   exit 1
               fi
-              remote_tip="$(git rev-parse FETCH_HEAD)"
+              # 取得した先端の解決も名指しで止める。ここだけ素通しにすると、
+              # FETCH_HEAD が解決できない日に "fatal: ambiguous argument" という
+              # 生の git エラーだけが出て、上の 2 つが避けている状態に戻ってしまう。
+              if ! remote_tip="$(git rev-parse FETCH_HEAD 2>"$git_err")"; then
+                  echo "::error::更新ブランチ $DATA_BRANCH の先端コミットを特定できませんでした: $(escape_annotation < "$git_err")"
+                  exit 1
+              fi
               if ! git push --force-with-lease="refs/heads/$DATA_BRANCH:$remote_tip" \
                   origin "HEAD:refs/heads/$DATA_BRANCH" 2>"$git_err"; then
                   echo "::error::更新ブランチ $DATA_BRANCH への push に失敗しました: $(escape_annotation < "$git_err")"
@@ -447,7 +453,7 @@ jobs:
           # フルネーム（owner/repo）から取り出す（env の REPO_FULL_NAME のコメント参照）
           REPO_NAME="${REPO_FULL_NAME#*/}"
 
-          # （このヘルパーは PR 作成ステップにも同じ内容で置いている。run: ブロックは
+          # （このヘルパーは "Commit to update branch" ステップにも同じ内容で置いている。run: ブロックは
           #   ステップごとに別のシェルなので関数を共有できないための重複であり、
           #   注釈の解釈を防ぐ安全側の処理なので、変更するときは必ず両方そろえること。）
           # 外部由来の文字列（git / gh のエラー出力）を ::error:: 等の注釈に埋め込む前に
@@ -981,7 +987,15 @@ jobs:
                   echo "::error::PR #${pr_number} の先端コミットを取得できませんでした: ${head_fetch_error}"
                   exit 1
               fi
-              echo "::error::PR #${pr_number} の先端が push したコミット（${PUSHED_SHA}）を含んでいません。取り込むと古い内容をマージする恐れがあるため中止します。"
+              if [ -z "${pr_head:-}" ]; then
+                  # 最後の試行で PR を読めておらず、比べる先端そのものが手元に無い。
+                  # 途中で一度でも読めていれば pr_read_ok は true になるため上の分岐は通らず、
+                  # このまま下へ落とすと「含んでいません」＝内容が古いと報告してしまい、
+                  # 実際は API 側が不安定なだけなのにブランチの中身を疑わせてしまう。
+                  echo "::error::PR #${pr_number} の先端を最後まで読み取れませんでした。取り込む内容が今回 push したものか確かめられないため中止します。GitHub API の状況を確認してください。更新ブランチ $DATA_BRANCH は push 済みです。"
+                  exit 1
+              fi
+              echo "::error::PR #${pr_number} の先端（${pr_head}）が push したコミット（${PUSHED_SHA}）を含んでいません。取り込むと古い内容をマージする恐れがあるため中止します。"
               exit 1
           fi
 
@@ -1058,13 +1072,23 @@ jobs:
               # generated_at は JavaScript の toISOString() 由来でミリ秒を含む
               # （例: 2026-08-02T21:43:22.448Z）。jq の fromdateiso8601 は秒までしか
               # 解釈できずエラーになるため、小数部を落としてから渡す。
-              # 判定自体が失敗しても本処理は成功しているので、握って警告なしに倒す
-              # （鮮度の通知のために更新そのものを失敗させない）。
-              data_is_stale="$(jq -rn \
+              # 判定自体が失敗しても、鮮度の通知のために更新そのものは失敗させない。
+              # ただし黙って「新しい」と読んではいけない: generated_at が解釈できない形
+              # （手で編集された・生成側の書式が変わった等）になると、この検知が二度と
+              # 発火しないまま緑が続き、下のコメントが無くそうとしている「緑のまま
+              # データが止まる」状態そのものになる。判定できなかったことは警告で必ず見せる。
+              # `$(cmd || echo X)` の形は使わない（部分出力とフォールバックが連結して
+              # 壊れた値になるため。read_pr_field のコメント参照）。
+              data_is_stale=""
+              if ! data_is_stale="$(jq -rn \
                   --arg t "$MERGED_GENERATED_AT" \
                   --argjson h "$STALE_DATA_HOURS" \
                   '($t | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) < (now - $h * 3600)' \
-                  2>/dev/null || echo "false")"
+                  2>/dev/null)"; then
+                  # 途中まで出力されていた値が残っていると誤判定するので捨てる
+                  data_is_stale=""
+                  echo "::warning::$BASE_BRANCH の $DATA_FILE の鮮度を判定できませんでした（generated_at: $(printf '%s' "$MERGED_GENERATED_AT" | escape_annotation)）。値が ISO 8601 の想定どおりか確認してください。判定できない間はデータ停止を検知できません。"
+              fi
               if [ "$data_is_stale" = "true" ]; then
                   echo "::error::$BASE_BRANCH の $DATA_FILE が ${STALE_DATA_HOURS} 時間以上更新されていません（最終: ${MERGED_GENERATED_AT}）。更新 PR の手配自体は成功しているので、必須チェックが失敗し続けている・auto-merge が成立していない・このワークフローを直した直後で前回までの停止が残っている、のいずれかです。PR #${pr_number} の状態を確認してください。"
                   # 警告では気づけない。スケジュール実行の失敗通知は「赤」にしか届かず、

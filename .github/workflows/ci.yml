@@ -129,7 +129,16 @@ jobs:
             # 列挙された個別ファイルだけを add する。
             # 一覧は git に直接読ませる（xargs 経由だと引数長の上限で git add が複数回に
             # 分割され、途中で失敗したとき一部だけステージされた状態になる）。
-            git add --pathspec-from-file="$new_snapshots" --pathspec-file-nul
+            # --literal-pathspecs は「一覧の各行をパターンでなく、そのままのファイル名として扱う」指定。
+            # --pathspec-file-nul が無効にするのは引用符や空白での区切り方だけで、
+            # * ? [ ] といったパターン記号としての意味は残る。たとえば新規ファイルが
+            # "hero[1]-linux.png" だと [1] が「1 という文字のどれか」と解釈され、
+            # すでに追跡されている hero1-linux.png（＝実際のリグレッション差分を抱えた既存
+            # ベースライン）まで一致してステージされてしまう。それでは上の
+            # 「既存の差分を混入させない」という前提が崩れるため、パターン解釈を止める。
+            # なお上の git ls-files 側は *.png というパターンで絞る必要があるので付けない
+            # （付けるとその行の * も文字どおりの記号として扱われ、1 件も一致しなくなる）。
+            git --literal-pathspecs add --pathspec-from-file="$new_snapshots" --pathspec-file-nul
             git commit -m "chore(e2e): Playwright ベースラインスナップショットを自動生成"
             # push 失敗はサイレントに通過させない（|| exit 1 で CI を即時失敗させる）
             git push || exit 1
@@ -140,8 +149,14 @@ jobs:
             # 黙って次のステップの exit 1 へ落ちると「なぜ自動コミットされないのか」が
             # ログから読み取れず、再実行しても赤のまま原因不明になる
             # （PNG 以外のスナップショットを使い始めたときにここへ来る）。
-            if [ -n "$(git ls-files --others --exclude-standard -- 'e2e/visual.spec.ts-snapshots/')" ]; then
-              echo "::warning::新規の未追跡ファイルはありますが PNG ではないため自動コミットしません。PNG 以外のスナップショットを扱う場合は、このステップの pathspec と update-portfolio-data.yml の MERGEABLE_EXTRA_PATHS を併せて見直してください。"
+            # git の実行結果はいったん変数へ受ける。if の条件式の中で "$(...)" を書くと、
+            # git 自体が失敗しても「出力が空」に見えるだけで set -e が働かず、
+            # 警告を出さないまま次のステップの exit 1 へ落ちてしまう（原因不明の赤に戻る）。
+            # 単独の代入文にしておけば、git が失敗した時点でこのステップが止まる。
+            leftover_untracked="$(git ls-files --others --exclude-standard -- 'e2e/visual.spec.ts-snapshots/')"
+            # -n は中身が空でないことの判定（＝PNG 以外の未追跡ファイルが残っている）
+            if [ -n "$leftover_untracked" ]; then
+              echo "::warning::新規の未追跡ファイルはありますが PNG ではないため自動コミットしません。PNG 以外のスナップショットを扱うなら、このステップの pathspec を広げてください（MERGEABLE_EXTRA_PATHS は e2e/visual.spec.ts-snapshots/ をディレクトリごと許可しているため、同じディレクトリ内であれば変更不要です）。"
             fi
           fi
 
@@ -153,6 +168,10 @@ jobs:
         # 自動生成されたベースラインは、その PR に次のコミットが積まれるまで
         # 一度も比較検証されない。初回生成物をそのまま基準にする運用上の割り切りであり、
         # 「次の実行で検証される」わけではない点に注意する。
+        # もう 1 つの帰結として、push 後の先端コミットにはチェック結果が 1 件も付かない。
+        # update-portfolio-data.yml は mergeStateStatus が CLEAN のときだけ取り込むため、
+        # 必須チェックが設定されていると日次データ更新 PR はその日は取り込まれずに残る
+        # （翌日の実行が最新の main から作り直すので、通常は放置しても自然に解消する）。
         # 既存スナップショットとの差分（実際のリグレッション）の場合は失敗を伝播する。
         if: steps.playwright.outcome == 'failure' && steps.autocommit.outputs.committed != 'true'
         run: exit 1

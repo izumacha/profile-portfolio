@@ -8,17 +8,6 @@ on:
 # ワークフローレベルの permissions は設定せず、各ジョブで最小権限を個別に指定する。
 # visual-regression ジョブはスナップショット自動コミットのため contents: write が必要。
 
-env:
-  # Playwright のベースライン画像が置かれるディレクトリ（末尾の / まで含める）。
-  # visual-regression ジョブの中で複数回参照するため、書き写さず 1 か所で持つ（§6 一元管理）。
-  # spec ごとに <spec 名>-snapshots/ が作られるため、2 本目の spec が
-  # スクリーンショットを撮るようになったらここを見直す。
-  # このパスは update-portfolio-data.yml の MERGEABLE_EXTRA_PATHS の内側に
-  # 収まっている必要がある（自動コミット先の更新ブランチは日次データ更新 PR の
-  # head でもあり、許可リストに無いパスが載るとその日の更新が止まるため）。
-  # したがって、狭める分には単独で変えてよく、広げるときだけ許可リスト側も併せて広げる。
-  SNAPSHOT_DIR: e2e/visual.spec.ts-snapshots/
-
 jobs:
   html-validate:
     runs-on: ubuntu-latest
@@ -61,6 +50,19 @@ jobs:
     # スナップショットが存在しない場合にベースラインを自動コミットするため write が必要
     permissions:
       contents: write
+    env:
+      # Playwright のベースライン画像が置かれるディレクトリ。
+      # 下のステップで複数回参照するため、書き写さず 1 か所で持つ（§6 一元管理）。
+      # 参照側で "${SNAPSHOT_DIR%/}/" と正規化するので、末尾の / の有無は問わない。
+      # spec ごとに <spec 名>-snapshots/ が作られるため、2 本目の spec が
+      # スクリーンショットを撮るようになったらここを見直す。
+      # このパスは update-portfolio-data.yml の MERGEABLE_EXTRA_PATHS の内側に
+      # 収まっている必要がある（自動コミット先の更新ブランチは日次データ更新 PR の
+      # head でもあり、許可リストに無いパスが載るとその日の更新が止まるため）。
+      # したがって、狭める分には単独で変えてよく、広げるときだけ許可リスト側も併せて広げる。
+      # ワークフローレベルでなくジョブレベルに置くのは、使うのがこのジョブだけであり
+      # 他ジョブの全ステップへ渡す必要がないため（§9 最小公開）。
+      SNAPSHOT_DIR: e2e/visual.spec.ts-snapshots/
     steps:
       # head_ref（PR ブランチ名）を明示して checkout することで、
       # デタッチ HEAD でなくブランチとして取得し git push を可能にする
@@ -113,7 +115,11 @@ jobs:
           new_snapshots="$(mktemp)"
           # ステップ終了時に一時ファイルを消す（失敗して途中で抜けても残さない）
           trap 'rm -f "$new_snapshots"' EXIT
-          # 対象ディレクトリは SNAPSHOT_DIR（ワークフローの env で 1 か所定義）。
+          # 対象ディレクトリは SNAPSHOT_DIR（このジョブの env で 1 か所定義）。
+          # ${SNAPSHOT_DIR%/} は「末尾に / があれば取り除く」書き方。そのうえで / を足すため、
+          # env 側が末尾 / を付け忘れても pathspec が兄弟ディレクトリへ広がらない
+          # （末尾 / が無いと e2e/...-snapshots*.png となり -snapshots-old/ 等にも当たる）。
+          snapshot_dir="${SNAPSHOT_DIR%/}/"
           # 拡張子まで絞る。ディレクトリ指定のままだと、中断した実行が残した一時ファイル等
           # PNG 以外の未追跡ファイルまで「ベースライン自動生成」という件名でコミットされる。
           # そのパスは MERGEABLE_EXTRA_PATHS のディレクトリ前方一致にも該当するため、
@@ -123,7 +129,21 @@ jobs:
           # （許可リストがパターンを書けるようになるまでの、入口側の一次防御）。
           # * はダブルクォートの中ではシェルに展開されず、git へそのまま渡って
           # git 側のパターンとして解釈される（意図どおり）。
-          git ls-files -z --others --exclude-standard -- "${SNAPSHOT_DIR}*.png" > "$new_snapshots"
+          git ls-files -z --others --exclude-standard -- "${snapshot_dir}*.png" > "$new_snapshots"
+
+          # 自動コミットの対象外になる未追跡ファイル（＝PNG 以外）を先に調べておく。
+          # 対象外が残っていることは、PNG が 1 枚でも生成されたかどうかとは独立した事実。
+          # 下の if の中だけで調べると、新規 PNG と PNG 以外が同時に出た日は
+          # PNG だけコミットして committed=true が立ち、取りこぼしを誰にも知らせないまま
+          # ジョブが緑で終わる（この診断が防ごうとしている状態そのもの）。
+          # ":(exclude)..." は「このパターンに当たるものを除く」という git の指定。
+          # -c core.quotePath=false は非 ASCII 名を 8 進エスケープでなくそのまま表示させる指定。
+          # git の実行結果はいったん変数へ受ける。if の条件式の中で "$(...)" を書くと、
+          # git 自体が失敗しても「出力が空」に見えるだけで set -e が働かず、
+          # 何も知らせないまま次のステップの exit 1 へ落ちてしまう（原因不明の赤に戻る）。
+          # 単独の代入文にしておけば、git が失敗した時点でこのステップが止まる。
+          skipped_untracked="$(git -c core.quotePath=false ls-files --others --exclude-standard \
+            -- "$snapshot_dir" ":(exclude)${snapshot_dir}*.png")"
           # -s はファイルが空でないことの判定（＝新規スナップショットが 1 件以上ある）
           if [ -s "$new_snapshots" ]; then
             # bot として git の作者情報を設定する
@@ -149,30 +169,28 @@ jobs:
             git push || exit 1
             # 次のステップで「自動コミット済み」と判定するために出力する
             echo "committed=true" >> "$GITHUB_OUTPUT"
-          else
-            # PNG は無かったが未追跡ファイル自体はある場合、事実を残す。
-            # 黙って次のステップの exit 1 へ落ちると「なぜ自動コミットされないのか」が
-            # ログから読み取れず、再実行しても赤のまま原因不明になる。
-            # ここへ来る原因は主に 2 つ（中断した実行が残した一時ファイル／PNG 以外の
-            # スナップショットを使い始めた）で、ログからは区別できない。取るべき対応が
-            # 正反対（前者は無視・後者は pathspec の見直し）なので、警告では
-            # 対処を指示せず、判断材料としてファイル名だけを出す。
-            # git の実行結果はいったん変数へ受ける。if の条件式の中で "$(...)" を書くと、
-            # git 自体が失敗しても「出力が空」に見えるだけで set -e が働かず、
-            # 警告を出さないまま次のステップの exit 1 へ落ちてしまう（原因不明の赤に戻る）。
-            # 単独の代入文にしておけば、git が失敗した時点でこのステップが止まる。
-            leftover_untracked="$(git ls-files --others --exclude-standard -- "$SNAPSHOT_DIR")"
-            # -n は中身が空でないことの判定（＝PNG 以外の未追跡ファイルが残っている）
-            if [ -n "$leftover_untracked" ]; then
-              # ファイル名をそのまま ::warning:: に差し込むと、名前に含まれる % や :: が
-              # GitHub のアノテーション記法として解釈され、偽のログコマンドを注入できる。
-              # update-portfolio-data.yml の escape_annotation と同じ規則で無害化する
-              # （記号を percent-encode し、改行は 1 行に収まるよう空白へ潰す）。
-              # sed は文字列の置換、tr は文字の置換を行うコマンド。
-              safe_list="$(printf '%s' "$leftover_untracked" \
-                | sed -e 's/%/%25/g' -e 's/\r/%0D/g' -e 's/::/%3A%3A/g' | tr '\n' ' ')"
-              echo "::warning::${SNAPSHOT_DIR} に未追跡ファイルがありますが PNG ではないため自動コミットの対象外です: ${safe_list}"
-            fi
+          fi
+
+          # 対象外の未追跡ファイルが残っていれば、コミットの有無にかかわらず事実を残す。
+          # 何も言わずに次のステップの exit 1 へ落ちると「なぜ自動コミットされないのか」が
+          # ログから読み取れず、再実行しても赤のまま原因不明になる。
+          # 原因は主に 2 つ（中断した実行が残した一時ファイル／PNG 以外のスナップショットを
+          # 使い始めた）で、ログからは区別できない。取るべき対応が正反対
+          # （前者は無視・後者は SNAPSHOT_DIR と pathspec の見直し）なので、
+          # 対処は指示せず、判断材料としてファイル名だけを出す。
+          # -n は中身が空でないことの判定
+          if [ -n "$skipped_untracked" ]; then
+            # 見出しだけをアノテーションにし、ファイル名は通常のログ行として出す。
+            # ファイル名を ::warning:: の行へ差し込むと、名前に含まれる % や :: が
+            # GitHub のアノテーション記法として解釈され、偽のログコマンドを注入できる
+            # （それを避けるための percent-encode を書くと、update-portfolio-data.yml の
+            #   escape_annotation と同じ規則が 3 か所目の書き写しになる）。
+            # 行頭に空白を置けば、その行が :: で始まることはないので注入は成立しない。
+            # 改行を含む名前も git 自身が \n という 2 文字へ変換して 1 行に収めるため、
+            # ファイル名が新しい行を始めることもない。
+            echo "::warning::${snapshot_dir} に PNG 以外の未追跡ファイルがあります（自動コミットの対象外）。詳細は次のログ行を参照してください。"
+            # sed で各行の先頭に "  - " を足す（複数行あっても全行に前置される）
+            printf '%s\n' "$skipped_untracked" | sed 's/^/  - /'
           fi
 
       - name: ビジュアルリグレッション失敗を伝播（自動生成以外の失敗のみ）

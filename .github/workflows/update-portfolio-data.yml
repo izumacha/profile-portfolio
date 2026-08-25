@@ -479,7 +479,10 @@ jobs:
                   fi
                   # 最終試行の後は待たない（実行しない再試行を告知しない）
                   if [ "$try" -lt "$api_retries" ]; then
-                      log "取得に失敗しました（${try}/${api_retries}）。${api_wait} 秒後に再試行します"
+                      # 何の取得が失敗したのかを関数名で示す。共通化前は呼び出しごとに
+                      # 固有の文言を書いていたので、汎用文だけにするとログから
+                      # 失敗箇所が分からなくなる
+                      log "取得に失敗しました（$1: ${try}/${api_retries}）。${api_wait} 秒後に再試行します"
                       sleep "$api_wait"
                   fi
               done
@@ -510,13 +513,16 @@ jobs:
               # 再試行に入らず、1 回目の空でそのまま中止＝その日の更新を落としてしまう。
               # 空も失敗とみなして数回待ち直し、それでも空なら範囲を確かめられないので中止する。
               files=""
+              # 前回の呼び出しが残した理由を持ち越さないよう、空にしてから始める
+              : > "$changed_files_err"
               if retry_capture changed_files_once; then
                   files="$retry_output"
               fi
               if [ -z "$files" ]; then
-                  # 「API が失敗した」のか「200 だが空配列が返り続けた」のかで
-                  # 疑うべき箇所が違うので、最後に 1 回だけ叩いて切り分ける。
-                  if gh api "repos/${REPO_FULL_NAME}/pulls/${pr_number}/files" >/dev/null 2>&1; then
+                  # 「API が失敗した」のか「200 だが空配列が返り続けた」のかで疑うべき箇所が
+                  # 違うので、最後の試行が実際に記録した理由（changed_files_err）で案内を分ける。
+                  # 理由を読めなかったときは API 側を疑う案内に寄せる（確認先が広い方）。
+                  if [ "$(cat "$changed_files_err")" = "empty" ]; then
                       echo "::error::PR #${pr_number} の変更ファイル一覧が空のままでした。範囲を確認できないため取り込みを中止します。"
                   else
                       echo "::error::PR #${pr_number} の変更ファイル一覧を取得できませんでした（API 呼び出しが失敗）。トークンの権限と GitHub API の状況を確認してください。"
@@ -668,7 +674,12 @@ jobs:
           # 先端の取得に失敗したときの理由を控える場所（空なら理由なし）
           fetch_err="$(mktemp)"
           head_fetch_error=""
-          trap 'rm -f "$fetch_err" "${create_err:-}"' EXIT
+          # 変更ファイル一覧の取得が失敗した理由（api / empty）を控える場所。
+          # retry_capture は関数をコマンド置換（サブシェル）で呼ぶため、関数の中で
+          # シェル変数へ書いても呼び出し側には伝わらない。ファイル越しなら伝わるので、
+          # 上の fetch_err と同じ方式で受け渡す。
+          changed_files_err="$(mktemp)"
+          trap 'rm -f "$fetch_err" "$changed_files_err" "${create_err:-}"' EXIT
 
           # PR の先端が「この実行で push したコミットを含んでいる」かを判定する。
           # 完全一致にしないのは、更新ブランチへ正当に別のコミットが積まれることがあるため
@@ -708,16 +719,24 @@ jobs:
           # gh pr view --json files は先頭 100 件で打ち切られるので REST をページングする。
           # REST のフィールド名は filename（GraphQL の files.path とは名前が異なる）。
           # rename では変更後のパスしか出ないため、変更元 previous_filename も検査対象に含める。
+          # 失敗した理由は changed_files_err に毎回上書きで残し、呼び出し側が
+          # 「API が落ちた」のか「200 だが空配列だった」のかを案内し分けられるようにする
+          # （もう一度 API を叩いて切り分けると、そのときの結果が再試行中に実際に
+          #   起きたことと食い違い、逆の案内を出しうる）。
           changed_files_once() {
               local out
               if ! out="$(gh api --paginate "repos/${REPO_FULL_NAME}/pulls/${pr_number}/files" \
                   --jq '.[] | .filename, (.previous_filename // empty)')"; then
+                  printf 'api' > "$changed_files_err"
                   return 1
               fi
               # 空は「変更が無い」ではなく「まだ取得できていない」とみなす
               if [ -z "$out" ]; then
+                  printf 'empty' > "$changed_files_err"
                   return 1
               fi
+              # 成功したので、前の試行が残した理由を消しておく
+              : > "$changed_files_err"
               printf '%s' "$out"
           }
 

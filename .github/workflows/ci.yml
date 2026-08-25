@@ -155,15 +155,24 @@ jobs:
           # 赤のまま原因不明になる。原因は主に 2 つ（中断した実行が残した一時ファイル／
           # PNG 以外のスナップショットを使い始めた）で、取るべき対応は正反対
           # （前者は無視・後者は SNAPSHOT_DIR と pathspec の見直し）。ログからは
-          # 区別できないので、対処は指示せず件数だけを出す。
-          # ファイル名そのものは出さない。名前は外部から与えられうるうえ、GitHub の
-          # ログコマンド記法（:: 形式と ##[ 形式）は行頭の空白を無視したり行の途中でも
-          # 拾ったりするため、前置きを足す程度では注入を防げない。無害化を書くと
+          # 区別できないので、対処は指示せず、件数と一覧という判断材料だけを渡す。
+          # ファイル名はアノテーションに差し込まず、ファイルへ書き出してアーティファクトで渡す。
+          # ログへ差し込むと、名前に含まれる :: や ##[ が GitHub のログコマンド記法として
+          # 解釈され、偽のコマンドを注入できる（どちらの記法も行頭の空白を無視したり
+          # 行の途中でも拾ったりするため、前置きを足す程度では防げない）。無害化を書けば
           # update-portfolio-data.yml の escape_annotation と同じ規則の写しが増える。
-          # どのファイルかは Playwright の出力と手元の git status で分かるので、
-          # ここは「対象外が何件あるか」だけを伝える役割に留める。
+          # ファイルの中身はログコマンドとして解釈されないので、この形なら無害化が要らない。
+          # 手元の git status では分からない点に注意する。これらは CI の作業領域にだけ
+          # 存在するファイルで、ローカルには無い（だから一覧を持ち帰れるようにする）。
+          # -c core.quotePath=false は非 ASCII 名を 8 進エスケープでなくそのまま出す指定
           if [ "$skipped_count" -gt 0 ]; then
-            echo "::warning::${snapshot_dir} に PNG 以外の未追跡ファイルが ${skipped_count} 件あります（自動コミットの対象外）。手元で git status を確認してください。"
+            # 書き出すのはディレクトリ内の未追跡ファイル全部（コミットする PNG も含む）。
+            # PNG だけを除いた一覧にするには裏返しの pathspec が要り、上の pathspec と
+            # 常に正確な補集合であり続ける必要が出る。全部を出せば参照する pathspec は
+            # 1 つのままで、読む側は拡張子で見分けられる。
+            git -c core.quotePath=false ls-files --others --exclude-standard \
+              -- "$snapshot_dir" > untracked-snapshot-files.txt
+            echo "::warning::${snapshot_dir} に PNG 以外の未追跡ファイルが ${skipped_count} 件あります（自動コミットの対象外）。同ディレクトリの未追跡ファイル一覧（コミットする PNG も含む）はアーティファクト playwright-snapshots の untracked-snapshot-files.txt を参照してください（CI の作業領域にだけ存在するため手元の git status には出ません）。"
           fi
           # 新規スナップショットが 1 件以上あるときだけコミットする。
           # 判定には上で数えた件数をそのまま使う（ファイルの空判定 -s と二重に持たない）
@@ -213,7 +222,11 @@ jobs:
         # 代償として、自動コミットが起きた実行に限り e2e が 2 回走る。
         id: playwright-recheck
         if: steps.autocommit.outputs.committed == 'true'
-        run: npm run test:e2e
+        # --output で出力先を分ける。Playwright は実行のたびに出力先ディレクトリを
+        # 丸ごと消してから始めるため、既定の test-results/ のまま 2 回目を走らせると
+        # 1 回目の trace やスクリーンショットが消え、失敗した実行の証拠が
+        # アーティファクトに残らなくなる（このディレクトリは下の upload 対象）。
+        run: npm run test:e2e -- --output=test-results-recheck
         # ここで落ちても最終判定は次のステップに任せる（このステップ自体は赤にしない）
         continue-on-error: true
 
@@ -234,10 +247,13 @@ jobs:
           steps.playwright.outcome == 'failure' &&
           (steps.autocommit.outputs.committed != 'true' ||
            steps.playwright-recheck.outcome == 'failure')
-        # 失敗の中身は上の 2 つのステップのログに出ているので、ここでは原因を断定しない
-        # （断定すると、実際は別の原因だったときに誤った案内になる）
+        # 失敗の中身は上の Playwright 実行ステップのログに出ているので、ここでは
+        # 原因を断定しない（断定すると、実際は別の原因だったときに誤った案内になる）。
+        # 再実行ステップは自動コミットが起きなかったときは skip され、ログを持たない。
+        # 名指しすると存在しないログへ誘導することになるため「上の Playwright の
+        # 実行ステップ」とだけ書く。
         run: |
-          echo "::error::ビジュアルリグレッションテストが失敗しました。上の「Run visual regression tests」と「ベースライン追加後にテストを再実行して確認」のログを確認してください。"
+          echo "::error::ビジュアルリグレッションテストが失敗しました。上の Playwright の実行ステップのログを確認してください。"
           exit 1
 
       # On failure, upload the (re)generated snapshots and the Playwright diff
@@ -250,5 +266,7 @@ jobs:
           path: |
             e2e/**/*.png
             test-results/
+            test-results-recheck/
+            untracked-snapshot-files.txt
           retention-days: 7
           if-no-files-found: ignore

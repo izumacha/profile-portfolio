@@ -93,26 +93,66 @@ jobs:
         run: |
           # 未定義変数・コマンド失敗・パイプ失敗を即時エラーとして検出する（セキュリティ上の best practice）
           set -euo pipefail
-          # 未追跡の PNG = スナップショットが存在しなかったため新規生成されたファイル
-          NEW=$(git ls-files --others --exclude-standard -- 'e2e/visual.spec.ts-snapshots/')
-          if [ -n "$NEW" ]; then
+          # 未追跡の PNG = スナップショットが存在しなかったため新規生成されたファイル。
+          # 一覧は NULL 区切りのままファイルへ受け、シェル変数を経由させない。
+          # 変数に入れて `printf '%s\0' $NEW` のように展開すると、NULL 区切りにする前に
+          # シェルが空白で単語分割してしまい、"my snap.png" が 2 つの引数に割れる
+          # （空白を含む名前も安全に扱う、という当初の意図が果たせていなかった）。
+          # 一覧を受け取る一時ファイルを作る
+          new_snapshots="$(mktemp)"
+          # ステップ終了時に一時ファイルを消す（失敗して途中で抜けても残さない）
+          trap 'rm -f "$new_snapshots"' EXIT
+          # 対象は visual.spec.ts のスナップショットディレクトリ。
+          # spec ごとに <spec 名>-snapshots/ が作られるため、2 本目の spec が
+          # スクリーンショットを撮るようになったらここも広げる必要がある。
+          # 守るべき関係は「ここで自動コミットする範囲が、update-portfolio-data.yml の
+          # MERGEABLE_EXTRA_PATHS の内側に収まっていること」。自動コミット先の更新ブランチは
+          # 日次データ更新 PR の head でもあり、許可リストに無いパスが載ると
+          # 「想定外の変更」としてその日の更新が止まるため。
+          # したがって、ここを狭める分には単独で変えてよく、広げるときだけ
+          # 許可リスト側も併せて広げる必要がある。
+          # 拡張子まで絞る。ディレクトリ指定のままだと、中断した実行が残した一時ファイル等
+          # PNG 以外の未追跡ファイルまで「ベースライン自動生成」という件名でコミットされる。
+          # そのパスは MERGEABLE_EXTRA_PATHS のディレクトリ前方一致にも該当するため、
+          # 日次データ更新 PR の許可判定も素通りしてしまう。ここで絞るのは
+          # 「この自動コミットが PNG 以外を持ち込まない」ことの保証であり、
+          # 許可リスト側は前方一致のままなので、別経路で置かれたファイルまでは防げない
+          # （許可リストがパターンを書けるようになるまでの、入口側の一次防御）
+          git ls-files -z --others --exclude-standard -- 'e2e/visual.spec.ts-snapshots/*.png' > "$new_snapshots"
+          # -s はファイルが空でないことの判定（＝新規スナップショットが 1 件以上ある）
+          if [ -s "$new_snapshots" ]; then
             # bot として git の作者情報を設定する
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
-            # 新規スナップショット（未追跡ファイル）だけをステージする
+            # 新規スナップショット（未追跡ファイル）だけをステージする。
             # git add e2e/... で全体を add すると既存の差分（リグレッション）も混入するため
-            # $NEW に列挙された個別ファイルだけを add する
-            # ファイル名にスペースや特殊文字が含まれる場合も安全に処理するため NULL 区切りを使用する
-            printf '%s\0' $NEW | xargs -0 git add --
+            # 列挙された個別ファイルだけを add する。
+            # 一覧は git に直接読ませる（xargs 経由だと引数長の上限で git add が複数回に
+            # 分割され、途中で失敗したとき一部だけステージされた状態になる）。
+            git add --pathspec-from-file="$new_snapshots" --pathspec-file-nul
             git commit -m "chore(e2e): Playwright ベースラインスナップショットを自動生成"
             # push 失敗はサイレントに通過させない（|| exit 1 で CI を即時失敗させる）
             git push || exit 1
             # 次のステップで「自動コミット済み」と判定するために出力する
             echo "committed=true" >> "$GITHUB_OUTPUT"
+          else
+            # PNG は無かったが未追跡ファイル自体はある場合、理由を明示する。
+            # 黙って次のステップの exit 1 へ落ちると「なぜ自動コミットされないのか」が
+            # ログから読み取れず、再実行しても赤のまま原因不明になる
+            # （PNG 以外のスナップショットを使い始めたときにここへ来る）。
+            if [ -n "$(git ls-files --others --exclude-standard -- 'e2e/visual.spec.ts-snapshots/')" ]; then
+              echo "::warning::新規の未追跡ファイルはありますが PNG ではないため自動コミットしません。PNG 以外のスナップショットを扱う場合は、このステップの pathspec と update-portfolio-data.yml の MERGEABLE_EXTRA_PATHS を併せて見直してください。"
+            fi
           fi
 
       - name: ビジュアルリグレッション失敗を伝播（自動生成以外の失敗のみ）
-        # スナップショットが自動コミットされた場合は次の CI 実行で検証するため現行ジョブは通す。
+        # スナップショットが自動コミットされた場合は現行ジョブを通す。
+        # 注意: この push は secrets.GITHUB_TOKEN で行うため、GitHub の仕様により
+        # 新しいワークフロー実行はトリガーされない（同リポジトリの
+        # update-portfolio-data.yml も同じ事実を前提にしている）。つまり
+        # 自動生成されたベースラインは、その PR に次のコミットが積まれるまで
+        # 一度も比較検証されない。初回生成物をそのまま基準にする運用上の割り切りであり、
+        # 「次の実行で検証される」わけではない点に注意する。
         # 既存スナップショットとの差分（実際のリグレッション）の場合は失敗を伝播する。
         if: steps.playwright.outcome == 'failure' && steps.autocommit.outputs.committed != 'true'
         run: exit 1

@@ -766,9 +766,10 @@ jobs:
                   --head "$DATA_BRANCH" \
                   --state open \
                   --json number,baseRefName,headRepositoryOwner,headRepository \
-                  | jq -r --arg owner "$REPO_OWNER" --arg repo "$REPO_NAME" \
+                  | jq -r --arg owner "$REPO_OWNER" --arg repo "$REPO_NAME" --arg base "$BASE_BRANCH" \
                        '[.[] | select(.headRepositoryOwner.login == $owner and .headRepository.name == $repo)]
-                        | .[0] | select(. != null) | "\(.number) \(.baseRefName)"'
+                        | (first(.[] | select(.baseRefName == $base)) // .[0])
+                        | select(. != null) | "\(.number) \(.baseRefName)"'
           }
 
           # PR 番号として妥当か（数字だけか）を確かめる。URL の解析結果をそのまま
@@ -847,6 +848,12 @@ jobs:
                   # その状態では gh は "already exists" を返し続けるので、下の
                   # トークン・権限を疑う案内を毎日出しながら永久に止まってしまう。
                   # base を外して探し直し、base を見て扱いを分ける。
+                  # 別 base の PR が見つかっても、それだけで「base のせい」と断定はしない。
+                  # 作成の失敗理由は権限不足など別のこともあり、そこで確定的に止めると
+                  # 下で出るはずのトークン・権限の案内と gh の出力を捨ててしまう。
+                  # gh のエラー文言（英語）に依存した判定も、文言が変われば黙って効かなく
+                  # なるため使わない。見つけた事実は控えて、下の案内に付け足すだけにする。
+                  base_mismatch_note=""
                   if [ -z "$pr_number" ] && retry_capture own_open_pr_any_base && [ -n "$retry_output" ]; then
                       # "<番号> <base 名>" の形で返るので分解する
                       recovered_number="${retry_output%% *}"
@@ -857,9 +864,9 @@ jobs:
                           pr_number="$recovered_number"
                           log "base 指定なしの再検索で PR #${pr_number} を見つけたため再利用します"
                       else
-                          # base が違うものは自動では扱えないので、実態を名指しして止める
-                          echo "::error::更新ブランチ $DATA_BRANCH の PR #${recovered_number} が $BASE_BRANCH ではなく $(printf '%s' "$recovered_base" | escape_annotation) へ向いているため、新しい PR を作成できません。base を $BASE_BRANCH に戻すか、その PR を閉じてください。"
-                          exit 1
+                          # 分かった事実を控える。下のエラーではこれを先頭に置く
+                          # （権限の一般論より、判明している具体的な原因を先に読ませる）
+                          base_mismatch_note="更新ブランチ $DATA_BRANCH には、$BASE_BRANCH ではなく $(printf '%s' "$recovered_base" | escape_annotation) へ向いた PR #${recovered_number} があります。まずこれを確認し、base を $BASE_BRANCH に戻すかその PR を閉じてください。それでも解決しない場合は以下も確認してください: "
                       fi
                   fi
                   if [ -z "$pr_number" ]; then
@@ -869,7 +876,7 @@ jobs:
                       #   - PAGES_DEPLOY_TOKEN 設定済みだが権限不足 … push は通るが PR 作成が 403 になる
                       # 更新ブランチは push 済みなので手動で PR を作れば取り込めるが、
                       # 気づかないまま放置されないようジョブは赤で終わらせる。
-                      echo "::error::PR を作成できませんでした（gh の出力: $(escape_annotation < "$create_err")）。PAGES_DEPLOY_TOKEN を設定している場合は contents: write に加えて pull-requests: write の権限があるか確認してください。未設定の場合はリポジトリ設定の 'Allow GitHub Actions to create and approve pull requests' を有効にするか、PAGES_DEPLOY_TOKEN を設定してください。更新ブランチ $DATA_BRANCH は push 済みです。"
+                      echo "::error::${base_mismatch_note}PR を作成できませんでした（gh の出力: $(escape_annotation < "$create_err")）。PAGES_DEPLOY_TOKEN を設定している場合は contents: write に加えて pull-requests: write の権限があるか確認してください。未設定の場合はリポジトリ設定の 'Allow GitHub Actions to create and approve pull requests' を有効にするか、PAGES_DEPLOY_TOKEN を設定してください。更新ブランチ $DATA_BRANCH は push 済みです。"
                       exit 1
                   fi
                   log "PR の作成は失敗しましたが、既存の PR #${pr_number} が見つかったため再利用します"

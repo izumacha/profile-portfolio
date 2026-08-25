@@ -189,40 +189,40 @@ jobs:
             git commit -m "chore(e2e): Playwright ベースラインスナップショットを自動生成"
             # push 失敗はサイレントに通過させない（|| exit 1 で CI を即時失敗させる）
             git push || exit 1
-            # ベースラインを足したうえで、同じテストをもう一度走らせて結果で判定する。
-            # committed=true は「今回の失敗はベースラインが無かったせいだけだった」と
-            # 主張するものなので、その主張はテストの結果そのもので確かめる必要がある。
-            #
-            # ワークツリーの状態（git diff）を見る判定では効かない。Playwright は既存
-            # ベースラインとの不一致時、差分画像を test-results/（gitignore 対象）へ
-            # 書くだけで、追跡済みのベースラインは書き換えないため（書き換えるのは
-            # --update-snapshots を changed / all で走らせたときだけで、既定は missing）。
-            # つまり差分は常に空に見え、判定は素通りする。
-            #
-            # 同じ理由で、npm run test:e2e は e2e/ 配下すべて（スナップショットを使わない
-            # sections.spec.ts の機能テストを含む）を走らせるので、ベースラインが 1 枚
-            # 欠けているだけでそれらの失敗まで握り潰されうる。テスト結果で判定すれば
-            # どちらの取りこぼしも同時に塞げる。
-            #
-            # 欠けていたベースラインが埋まっただけなら、この再実行は通る。
-            # まだ失敗するなら「ベースラインが無かった」以外の失敗なので、
-            # committed=true を立てず次のステップに失敗を伝播させる
-            # （新規ベースラインの追加自体は正しいので、コミットと push は取り消さない）。
-            if npm run test:e2e; then
-              echo "committed=true" >> "$GITHUB_OUTPUT"
-            else
-              echo "::error::新規ベースラインを追加して再実行しましたが、まだ失敗しています。ベースラインの欠落以外の原因（既存画面のリグレッション、機能テストの失敗など）があります。手元で npm run test:e2e を実行して確認してください。"
-            fi
+            # 次のステップで「自動コミットした」と判定するために出力する
+            echo "committed=true" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: ベースライン追加後にテストを再実行して確認
+        # 自動コミットが起きたときだけ走る。
+        # 「今回の失敗はベースラインが無かったせいだけだった」ことを、テストの結果
+        # そのもので確かめるステップ。欠けていたベースラインが埋まっただけなら通る。
+        #
+        # ワークツリーの状態（git diff）を見る判定では代用できない。Playwright は
+        # 既存ベースラインとの不一致時、差分画像を test-results/（gitignore 対象）へ
+        # 書くだけで、追跡済みのベースラインは書き換えないため（書き換えるのは
+        # --update-snapshots を changed / all で走らせたときだけで、既定は missing）。
+        # つまり差分は常に空に見え、その手の判定は素通りする。
+        #
+        # npm run test:e2e は e2e/ 配下すべて（スナップショットを使わない
+        # sections.spec.ts の機能テストを含む）を走らせるので、ベースラインが 1 枚
+        # 欠けているだけでそれらの失敗まで見逃す、という取りこぼしも同時に塞げる。
+        #
+        # 判定をシェルの中でなく独立したステップの成否に持たせているのは、
+        # Actions の画面でログを開かずに結果が見えるようにするため。
+        # 代償として、自動コミットが起きた実行に限り e2e が 2 回走る。
+        id: playwright-recheck
+        if: steps.autocommit.outputs.committed == 'true'
+        run: npm run test:e2e
+        # ここで落ちても最終判定は次のステップに任せる（このステップ自体は赤にしない）
+        continue-on-error: true
+
       - name: ビジュアルリグレッション失敗を伝播（自動生成以外の失敗のみ）
-        # スナップショットが自動コミットされた場合は現行ジョブを通す。
-        # committed=true が立つのは、ベースラインを足したうえでテストを再実行し、
-        # それが通ったときだけ（前ステップ参照）。つまり「今回の失敗はベースラインが
-        # 無かったせいだけだった」ことは確認済みで、通すのは安全。
+        # 通してよいのは「自動コミットが起きて、かつ再実行が通った」ときだけ。
+        # 再実行が通った＝今回の失敗はベースラインの欠落だけが原因だったということ。
         # ただし確認できるのは「そのベースラインが再現する」ことまでで、
         # 「その見た目が正しい」かどうかは人のレビューでしか分からない。
-        # 注意: この push は secrets.GITHUB_TOKEN で行うため、GitHub の仕様により
+        # 注意: 自動コミットの push は secrets.GITHUB_TOKEN で行うため、GitHub の仕様により
         # 新しいワークフロー実行はトリガーされない（同リポジトリの
         # update-portfolio-data.yml も同じ事実を前提にしている）。
         # もう 1 つの帰結として、push 後の先端コミットにはチェック結果が 1 件も付かない。
@@ -230,9 +230,15 @@ jobs:
         # 日次データ更新 PR がこれに当たった場合にどう扱われるかは
         # update-portfolio-data.yml 側の判断なので、ここでは方針を書き写さない
         # （書き写すと片方だけ変わったときに、こちらの記述だけが古くなる）。
-        # 既存スナップショットとの差分（実際のリグレッション）の場合は失敗を伝播する。
-        if: steps.playwright.outcome == 'failure' && steps.autocommit.outputs.committed != 'true'
-        run: exit 1
+        if: >
+          steps.playwright.outcome == 'failure' &&
+          (steps.autocommit.outputs.committed != 'true' ||
+           steps.playwright-recheck.outcome == 'failure')
+        # 失敗の中身は上の 2 つのステップのログに出ているので、ここでは原因を断定しない
+        # （断定すると、実際は別の原因だったときに誤った案内になる）
+        run: |
+          echo "::error::ビジュアルリグレッションテストが失敗しました。上の「Run visual regression tests」と「ベースライン追加後にテストを再実行して確認」のログを確認してください。"
+          exit 1
 
       # On failure, upload the (re)generated snapshots and the Playwright diff
       # report so baselines can be refreshed when the layout changes.

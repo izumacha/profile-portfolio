@@ -462,6 +462,10 @@ jobs:
           # 「一時的な API エラーを再試行する」ことは目的が違うので別々に持つ。
           state_attempts=8   # マージ可否・PR 先端の反映待ち（最大 8 回）
           state_wait=15      # 状態待ちの間隔（秒）
+          # 「呼び出しは成功したが中身が空だった」を retry_capture へ伝えるための終了コード。
+          # gh や jq が使う小さな値（jq はプログラムのコンパイル失敗で 3 を返す）と
+          # ぶつからないよう、通常のツールが返さない値を選ぶ。
+          retry_empty_status=97
           api_retries=3      # 読み取り系 API の一時エラー再試行（設定不備は繰り返しても直らない）
           api_wait=10        # 再試行の間隔（秒）
           merge_rounds=2     # マージ手配（2 方式の往復）の再試行回数
@@ -469,20 +473,43 @@ jobs:
           # 標準出力を返すコマンドを、一時的な失敗なら少し待って数回だけ再試行する。
           # 結果は変数 retry_output に入れて返す（$( ) で包むと、失敗した試行が
           # 途中まで出した出力と成功した試行の出力が連結してしまうため）。
+          # 失敗の内訳。呼び出したコマンドが retry_empty_status を返したら
+          # 「呼び出しは成功したが中身が空」、それ以外の非ゼロは呼び出し自体の失敗とみなす。
+          # 両方を観測することがあるので個別のフラグに記録し、どちらか一方に丸めない
+          # （丸めると、待てば直る事象を権限問題として案内する／その逆、が起きる）。
           retry_output=""
+          retry_saw_empty=false
+          retry_saw_error=false
           retry_capture() {
-              local try
+              local try status
+              # 前回の呼び出しの観測結果を持ち越さないよう、毎回リセットしてから始める
+              retry_saw_empty=false
+              retry_saw_error=false
               for try in $(seq 1 "$api_retries"); do
-                  # 各試行の出力は毎回上書きし、前の試行の残骸が混ざらないようにする
+                  # 各試行の出力は毎回上書きし、前の試行の残骸が混ざらないようにする。
+                  # 終了コードは必ず else の中で受け取る。`if ...; then ...; fi` を抜けた後の
+                  # $? は if 文自体の結果（分岐しなければ 0）になり、コマンドの終了コードは
+                  # 読めないため。
                   if retry_output="$("$@")"; then
                       return 0
+                  else
+                      status=$?
+                  fi
+                  # 失敗の種類を終了コードで見分ける。以下のログに付く $1 は
+                  # 「何の取得が失敗したのか」を関数名で示すためのもので、
+                  # 汎用文だけにするとログから失敗箇所が分からなくなる。
+                  if [ "$status" -eq "$retry_empty_status" ]; then
+                      # 取得はできたが中身が空。待てば埋まることがあるので再試行する
+                      retry_saw_empty=true
+                      log "取得できましたが中身が空でした（$1: ${try}/${api_retries}）"
+                  else
+                      # 呼び出し自体の失敗（権限・通信・GitHub 側の障害）
+                      retry_saw_error=true
+                      log "取得に失敗しました（$1: ${try}/${api_retries}）"
                   fi
                   # 最終試行の後は待たない（実行しない再試行を告知しない）
                   if [ "$try" -lt "$api_retries" ]; then
-                      # 何の取得が失敗したのかを関数名で示す。共通化前は呼び出しごとに
-                      # 固有の文言を書いていたので、汎用文だけにするとログから
-                      # 失敗箇所が分からなくなる
-                      log "取得に失敗しました（$1: ${try}/${api_retries}）。${api_wait} 秒後に再試行します"
+                      log "${api_wait} 秒後に再試行します"
                       sleep "$api_wait"
                   fi
               done
@@ -513,16 +540,18 @@ jobs:
               # 再試行に入らず、1 回目の空でそのまま中止＝その日の更新を落としてしまう。
               # 空も失敗とみなして数回待ち直し、それでも空なら範囲を確かめられないので中止する。
               files=""
-              # 前回の呼び出しが残した理由を持ち越さないよう、空にしてから始める
-              : > "$changed_files_err"
               if retry_capture changed_files_once; then
                   files="$retry_output"
               fi
               if [ -z "$files" ]; then
                   # 「API が失敗した」のか「200 だが空配列が返り続けた」のかで疑うべき箇所が
-                  # 違うので、最後の試行が実際に記録した理由（changed_files_err）で案内を分ける。
-                  # 理由を読めなかったときは API 側を疑う案内に寄せる（確認先が広い方）。
-                  if [ "$(cat "$changed_files_err")" = "empty" ]; then
+                  # 違うので、再試行中に実際に観測した内訳で案内を分ける。
+                  # 両方観測した場合はどちらかに丸めず併記する
+                  # （後から叩き直して終了コードだけ見る方法では別時点の結果を見ることになり、
+                  #   両方向に誤判定するため、観測した事実だけを使う）。
+                  if [ "$retry_saw_error" = "true" ] && [ "$retry_saw_empty" = "true" ]; then
+                      echo "::error::PR #${pr_number} の変更ファイル一覧を取得できませんでした（空の応答と API 呼び出しの失敗の両方が発生）。GitHub API の状況とトークンの権限を確認してください。差分の再計算中だった可能性もあります。"
+                  elif [ "$retry_saw_empty" = "true" ]; then
                       echo "::error::PR #${pr_number} の変更ファイル一覧が空のままでした。範囲を確認できないため取り込みを中止します。"
                   else
                       echo "::error::PR #${pr_number} の変更ファイル一覧を取得できませんでした（API 呼び出しが失敗）。トークンの権限と GitHub API の状況を確認してください。"
@@ -674,12 +703,7 @@ jobs:
           # 先端の取得に失敗したときの理由を控える場所（空なら理由なし）
           fetch_err="$(mktemp)"
           head_fetch_error=""
-          # 変更ファイル一覧の取得が失敗した理由（api / empty）を控える場所。
-          # retry_capture は関数をコマンド置換（サブシェル）で呼ぶため、関数の中で
-          # シェル変数へ書いても呼び出し側には伝わらない。ファイル越しなら伝わるので、
-          # 上の fetch_err と同じ方式で受け渡す。
-          changed_files_err="$(mktemp)"
-          trap 'rm -f "$fetch_err" "$changed_files_err" "${create_err:-}"' EXIT
+          trap 'rm -f "$fetch_err" "${create_err:-}"' EXIT
 
           # PR の先端が「この実行で push したコミットを含んでいる」かを判定する。
           # 完全一致にしないのは、更新ブランチへ正当に別のコミットが積まれることがあるため
@@ -719,24 +743,18 @@ jobs:
           # gh pr view --json files は先頭 100 件で打ち切られるので REST をページングする。
           # REST のフィールド名は filename（GraphQL の files.path とは名前が異なる）。
           # rename では変更後のパスしか出ないため、変更元 previous_filename も検査対象に含める。
-          # 失敗した理由は changed_files_err に毎回上書きで残し、呼び出し側が
-          # 「API が落ちた」のか「200 だが空配列だった」のかを案内し分けられるようにする
-          # （もう一度 API を叩いて切り分けると、そのときの結果が再試行中に実際に
-          #   起きたことと食い違い、逆の案内を出しうる）。
           changed_files_once() {
               local out
+              # 呼び出し自体が失敗した場合は 1（retry_capture は「API 失敗」と数える）
               if ! out="$(gh api --paginate "repos/${REPO_FULL_NAME}/pulls/${pr_number}/files" \
                   --jq '.[] | .filename, (.previous_filename // empty)')"; then
-                  printf 'api' > "$changed_files_err"
                   return 1
               fi
-              # 空は「変更が無い」ではなく「まだ取得できていない」とみなす
+              # 空は「変更が無い」ではなく「まだ取得できていない」とみなし、
+              # 専用の終了コードで retry_capture へ伝える
               if [ -z "$out" ]; then
-                  printf 'empty' > "$changed_files_err"
-                  return 1
+                  return "$retry_empty_status"
               fi
-              # 成功したので、前の試行が残した理由を消しておく
-              : > "$changed_files_err"
               printf '%s' "$out"
           }
 

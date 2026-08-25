@@ -492,7 +492,7 @@ jobs:
           # 積まれた別のコミットも squash マージに巻き込まれ得る。データ更新という
           # 件名で無関係な変更が main へ入らないよう、範囲を明示的に区切る。
           assert_changed_files_allowed() {
-              local files unexpected changed_path allowed_entry path_allowed mergeable_paths files_try
+              local files unexpected changed_path allowed_entry path_allowed mergeable_paths
               # 許可リストは DATA_FILE と追加分を実行時に連結して作る（二重管理を避ける）
               mergeable_paths="$(printf '%s\n%s\n' "$DATA_FILE" "$MERGEABLE_EXTRA_PATHS")"
               # 変更パスの一覧を取得する。取れなければ範囲を確かめられないので中止するが、
@@ -510,20 +510,17 @@ jobs:
               # 再試行に入らず、1 回目の空でそのまま中止＝その日の更新を落としてしまう。
               # 空も失敗とみなして数回待ち直し、それでも空なら範囲を確かめられないので中止する。
               files=""
-              for files_try in $(seq 1 "$api_retries"); do
-                  if retry_output="$(gh api --paginate "repos/${REPO_FULL_NAME}/pulls/${pr_number}/files" \
-                      --jq '.[] | .filename, (.previous_filename // empty)')" && [ -n "$retry_output" ]; then
-                      files="$retry_output"
-                      break
-                  fi
-                  # 最終試行の後は待たない（実行しない再試行を告知しない）
-                  if [ "$files_try" -lt "$api_retries" ]; then
-                      log "変更ファイル一覧を取得できませんでした（${files_try}/${api_retries}）。${api_wait} 秒後に再試行します"
-                      sleep "$api_wait"
-                  fi
-              done
+              if retry_capture changed_files_once; then
+                  files="$retry_output"
+              fi
               if [ -z "$files" ]; then
-                  echo "::error::PR #${pr_number} の変更ファイル一覧を取得できませんでした（空のまま）。範囲を確認できないため取り込みを中止します。"
+                  # 「API が失敗した」のか「200 だが空配列が返り続けた」のかで
+                  # 疑うべき箇所が違うので、最後に 1 回だけ叩いて切り分ける。
+                  if gh api "repos/${REPO_FULL_NAME}/pulls/${pr_number}/files" >/dev/null 2>&1; then
+                      echo "::error::PR #${pr_number} の変更ファイル一覧が空のままでした。範囲を確認できないため取り込みを中止します。"
+                  else
+                      echo "::error::PR #${pr_number} の変更ファイル一覧を取得できませんでした（API 呼び出しが失敗）。トークンの権限と GitHub API の状況を確認してください。"
+                  fi
                   exit 1
               fi
               # 許可リストのいずれにも前方一致しないパスを拾う。
@@ -704,6 +701,39 @@ jobs:
               git merge-base --is-ancestor "$PUSHED_SHA" "$head"
           }
 
+          # 変更ファイル一覧を 1 回だけ取得する。retry_capture から呼ばれる前提で、
+          # 「API 失敗」も「200 だが空配列」もどちらも失敗として返し再試行に載せる。
+          # 空が失敗なのは、force push 直後の差分再計算中に 200 と空配列が返ることがあり、
+          # 終了コードだけを見ると再試行に入らず、その日の更新を落としてしまうため。
+          # gh pr view --json files は先頭 100 件で打ち切られるので REST をページングする。
+          # REST のフィールド名は filename（GraphQL の files.path とは名前が異なる）。
+          # rename では変更後のパスしか出ないため、変更元 previous_filename も検査対象に含める。
+          changed_files_once() {
+              local out
+              if ! out="$(gh api --paginate "repos/${REPO_FULL_NAME}/pulls/${pr_number}/files" \
+                  --jq '.[] | .filename, (.previous_filename // empty)')"; then
+                  return 1
+              fi
+              # 空は「変更が無い」ではなく「まだ取得できていない」とみなす
+              if [ -z "$out" ]; then
+                  return 1
+              fi
+              printf '%s' "$out"
+          }
+
+          # 上と同じ絞り込みだが base を問わない版。番号と base 名を "<番号> <base>" で返す。
+          # base で絞った検索が空になったときの原因切り分け（付け替えられたのか、
+          # 単に取り逃したのか）に使う。
+          own_open_pr_any_base() {
+              gh pr list \
+                  --head "$DATA_BRANCH" \
+                  --state open \
+                  --json number,baseRefName,headRepositoryOwner,headRepository \
+                  | jq -r --arg owner "$REPO_OWNER" --arg repo "$REPO_NAME" \
+                       '[.[] | select(.headRepositoryOwner.login == $owner and .headRepository.name == $repo)]
+                        | .[0] | select(. != null) | "\(.number) \(.baseRefName)"'
+          }
+
           # PR 番号として妥当か（数字だけか）を確かめる。URL の解析結果をそのまま
           # 後段へ渡すと、想定外の出力だったときに「反映待ちのタイムアウト」など
           # 見当違いの失敗として現れるため、ここで弾く。
@@ -779,17 +809,19 @@ jobs:
                   # 別の base へ向いている（誰かが付け替えた等）と永遠に見つからない。
                   # その状態では gh は "already exists" を返し続けるので、下の
                   # トークン・権限を疑う案内を毎日出しながら永久に止まってしまう。
-                  # base を外して探し直し、見つかったら実態に即して報告する。
-                  if [ -z "$pr_number" ]; then
-                      other_base_pr="$(gh pr list \
-                          --head "$DATA_BRANCH" \
-                          --state open \
-                          --json number,baseRefName,headRepositoryOwner,headRepository \
-                          | jq -r --arg owner "$REPO_OWNER" --arg repo "$REPO_NAME" \
-                               '[.[] | select(.headRepositoryOwner.login == $owner and .headRepository.name == $repo)]
-                                | .[0] | select(. != null) | "#\(.number)（base: \(.baseRefName)）"' || echo "")"
-                      if [ -n "$other_base_pr" ]; then
-                          echo "::error::更新ブランチ $DATA_BRANCH の PR ${other_base_pr} が $BASE_BRANCH 以外へ向いているため、新しい PR を作成できません。base を $BASE_BRANCH に戻すか、その PR を閉じてください。"
+                  # base を外して探し直し、base を見て扱いを分ける。
+                  if [ -z "$pr_number" ] && retry_capture own_open_pr_any_base && [ -n "$retry_output" ]; then
+                      # "<番号> <base 名>" の形で返るので分解する
+                      recovered_number="${retry_output%% *}"
+                      recovered_base="${retry_output#* }"
+                      if [ "$recovered_base" = "$BASE_BRANCH" ]; then
+                          # base は正しい＝直前の絞り込み検索で取り逃していただけなので、
+                          # その PR をそのまま使う（ここで止めると更新を落としてしまう）
+                          pr_number="$recovered_number"
+                          log "base 指定なしの再検索で PR #${pr_number} を見つけたため再利用します"
+                      else
+                          # base が違うものは自動では扱えないので、実態を名指しして止める
+                          echo "::error::更新ブランチ $DATA_BRANCH の PR #${recovered_number} が $BASE_BRANCH ではなく $(printf '%s' "$recovered_base" | escape_annotation) へ向いているため、新しい PR を作成できません。base を $BASE_BRANCH に戻すか、その PR を閉じてください。"
                           exit 1
                       fi
                   fi

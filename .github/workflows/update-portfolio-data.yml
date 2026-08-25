@@ -325,6 +325,13 @@ jobs:
               echo "::error::起点ブランチの $DATA_FILE から generated_at を読めませんでした。ファイルが壊れている可能性があります。"
               exit 1
           fi
+          # jq は「キーが無い」場合も成功して空を返す。空のまま後段へ渡すと鮮度検査が
+          # 静かに素通りし、「データが止まっているのに緑」という本 PR が無くそうとした
+          # 状態に戻るため、空も異常として扱う（fail-closed）。
+          if [ -z "$base_generated_at" ]; then
+              echo "::error::起点ブランチの $DATA_FILE に generated_at がありません。鮮度を判定できないため中止します。"
+              exit 1
+          fi
           # 値に改行が混じると 2 行目が別の出力として解釈され、sha 等を上書きできてしまう。
           # 改行を含み得る値は区切り文字付きのヒアドキュメント形式で書き出す。
           {
@@ -475,26 +482,42 @@ jobs:
 
           # 取り込もうとしている PR の変更パスが許可リストの範囲に収まっているかを確かめる。
           # 先端の判定を「push したコミットを含むこと」に緩めた結果、更新ブランチに
-          # 積まれた別のコミットも squash マージに巻き込まれ得る。データ更新という
-          # 件名で無関係な変更が main へ入らないよう、範囲を明示的に区切る。
+          # 積まれた別のコミットも squash マージに巻き込まれ得るため、データ更新という
+          # 件名で無関係な変更が入らないよう範囲を区切る。
+          #
+          # ただしこれは「手配した時点」の検査であって、取り込みの保証ではない。
+          # auto-merge を予約したあとに更新ブランチへ push されたコミットは、
+          # 条件が整った時点でそのまま取り込まれ、この検査を通らない
+          # （予約は非同期に成立するため、ワークフロー側からは介入できない）。
+          # 最終的に main を守るのはブランチ保護と必須チェックであり、
+          # ここはその手前で明らかな逸脱を止める多層防御の 1 枚と位置づける。
           assert_changed_files_allowed() {
-              local files unexpected changed_path allowed_entry path_allowed mergeable_paths
+              local files unexpected changed_path allowed_entry path_allowed mergeable_paths files_try
               # 許可リストは DATA_FILE と追加分を実行時に連結して作る（二重管理を避ける）
               mergeable_paths="$(printf '%s\n%s\n' "$DATA_FILE" "$MERGEABLE_EXTRA_PATHS")"
               # 変更パスの一覧を取得する。取れなければ範囲を確かめられないので中止するが、
               # 一時的な API エラーで 1 日分の更新を落とさないよう他の読み取りと同じく再試行する
               # gh pr view --json files は先頭 100 件で打ち切られ、超過分を検査せずに
               # 「想定外なし」と判定してしまう。REST API をページングして全件取得する。
-              if ! retry_capture gh api --paginate "repos/${REPO_FULL_NAME}/pulls/${pr_number}/files" --jq '.[].path'; then
-                  echo "::error::PR #${pr_number} の変更ファイル一覧を取得できませんでした。範囲を確認できないため取り込みを中止します。"
-                  exit 1
-              fi
-              files="$retry_output"
+              #
               # 1 件も返らないのは「変更が無い」ではなく取得できていない状態
-              # （直前の force push 直後は差分の再計算中に空が返ることがある）。
-              # 空を「想定外なし」と読むと、範囲を確かめないまま取り込んでしまう。
+              # （直前の force push 直後は差分の再計算中に 200 と空配列が返ることがある）。
+              # この場合コマンド自体は成功するので、終了コードを見る再試行では拾えない。
+              # 空も失敗とみなして再試行し、それでも空なら範囲を確かめられないので中止する。
+              files=""
+              for files_try in $(seq 1 "$api_retries"); do
+                  if retry_output="$(gh api --paginate "repos/${REPO_FULL_NAME}/pulls/${pr_number}/files" --jq '.[].path')" \
+                      && [ -n "$retry_output" ]; then
+                      files="$retry_output"
+                      break
+                  fi
+                  if [ "$files_try" -lt "$api_retries" ]; then
+                      log "変更ファイル一覧が取得できませんでした（${files_try}/${api_retries}）。${api_wait} 秒後に再試行します"
+                      sleep "$api_wait"
+                  fi
+              done
               if [ -z "$files" ]; then
-                  echo "::error::PR #${pr_number} の変更ファイル一覧が空でした。範囲を確認できないため取り込みを中止します。"
+                  echo "::error::PR #${pr_number} の変更ファイル一覧を取得できませんでした（空のまま）。範囲を確認できないため取り込みを中止します。"
                   exit 1
               fi
               # 許可リストのいずれにも前方一致しないパスを拾う。
@@ -715,6 +738,22 @@ jobs:
                   pr_number=""
                   if retry_capture own_open_pr_number; then
                       pr_number="$retry_output"
+                  fi
+                  # ここで見つからないのに "already exists" が返る典型は、同じ head の PR が
+                  # 別の base へ向いている場合（誰かが付け替えた等）。base で絞った検索では
+                  # 永遠に見つからず、権限の問題という誤った案内を毎日出し続けてしまうので、
+                  # base を外して探し直し、見つかったら実態に即して報告する。
+                  if [ -z "$pr_number" ]; then
+                      other_base_pr="$(gh pr list \
+                          --head "$DATA_BRANCH" \
+                          --state open \
+                          --json number,baseRefName,headRepositoryOwner,headRepository \
+                          | jq -r --arg owner "$REPO_OWNER" --arg repo "$REPO_NAME" \
+                               '[.[] | select(.headRepositoryOwner.login == $owner and .headRepository.name == $repo)] | .[0] | select(. != null) | "#\(.number) (base: \(.baseRefName))"' || echo "")"
+                      if [ -n "$other_base_pr" ]; then
+                          echo "::error::更新ブランチ $DATA_BRANCH の PR ${other_base_pr} が $BASE_BRANCH 以外へ向いているため、新しい PR を作成できません。base を $BASE_BRANCH に戻すか、その PR を閉じてください。"
+                          exit 1
+                      fi
                   fi
                   if [ -z "$pr_number" ]; then
                       # 代表的な原因は 2 つあり、どちらかで案内先が変わるため両方を挙げる:

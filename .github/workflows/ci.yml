@@ -8,6 +8,17 @@ on:
 # ワークフローレベルの permissions は設定せず、各ジョブで最小権限を個別に指定する。
 # visual-regression ジョブはスナップショット自動コミットのため contents: write が必要。
 
+env:
+  # Playwright のベースライン画像が置かれるディレクトリ（末尾の / まで含める）。
+  # visual-regression ジョブの中で複数回参照するため、書き写さず 1 か所で持つ（§6 一元管理）。
+  # spec ごとに <spec 名>-snapshots/ が作られるため、2 本目の spec が
+  # スクリーンショットを撮るようになったらここを見直す。
+  # このパスは update-portfolio-data.yml の MERGEABLE_EXTRA_PATHS の内側に
+  # 収まっている必要がある（自動コミット先の更新ブランチは日次データ更新 PR の
+  # head でもあり、許可リストに無いパスが載るとその日の更新が止まるため）。
+  # したがって、狭める分には単独で変えてよく、広げるときだけ許可リスト側も併せて広げる。
+  SNAPSHOT_DIR: e2e/visual.spec.ts-snapshots/
+
 jobs:
   html-validate:
     runs-on: ubuntu-latest
@@ -102,23 +113,17 @@ jobs:
           new_snapshots="$(mktemp)"
           # ステップ終了時に一時ファイルを消す（失敗して途中で抜けても残さない）
           trap 'rm -f "$new_snapshots"' EXIT
-          # 対象は visual.spec.ts のスナップショットディレクトリ。
-          # spec ごとに <spec 名>-snapshots/ が作られるため、2 本目の spec が
-          # スクリーンショットを撮るようになったらここも広げる必要がある。
-          # 守るべき関係は「ここで自動コミットする範囲が、update-portfolio-data.yml の
-          # MERGEABLE_EXTRA_PATHS の内側に収まっていること」。自動コミット先の更新ブランチは
-          # 日次データ更新 PR の head でもあり、許可リストに無いパスが載ると
-          # 「想定外の変更」としてその日の更新が止まるため。
-          # したがって、ここを狭める分には単独で変えてよく、広げるときだけ
-          # 許可リスト側も併せて広げる必要がある。
+          # 対象ディレクトリは SNAPSHOT_DIR（ワークフローの env で 1 か所定義）。
           # 拡張子まで絞る。ディレクトリ指定のままだと、中断した実行が残した一時ファイル等
           # PNG 以外の未追跡ファイルまで「ベースライン自動生成」という件名でコミットされる。
           # そのパスは MERGEABLE_EXTRA_PATHS のディレクトリ前方一致にも該当するため、
           # 日次データ更新 PR の許可判定も素通りしてしまう。ここで絞るのは
           # 「この自動コミットが PNG 以外を持ち込まない」ことの保証であり、
           # 許可リスト側は前方一致のままなので、別経路で置かれたファイルまでは防げない
-          # （許可リストがパターンを書けるようになるまでの、入口側の一次防御）
-          git ls-files -z --others --exclude-standard -- 'e2e/visual.spec.ts-snapshots/*.png' > "$new_snapshots"
+          # （許可リストがパターンを書けるようになるまでの、入口側の一次防御）。
+          # * はダブルクォートの中ではシェルに展開されず、git へそのまま渡って
+          # git 側のパターンとして解釈される（意図どおり）。
+          git ls-files -z --others --exclude-standard -- "${SNAPSHOT_DIR}*.png" > "$new_snapshots"
           # -s はファイルが空でないことの判定（＝新規スナップショットが 1 件以上ある）
           if [ -s "$new_snapshots" ]; then
             # bot として git の作者情報を設定する
@@ -145,18 +150,28 @@ jobs:
             # 次のステップで「自動コミット済み」と判定するために出力する
             echo "committed=true" >> "$GITHUB_OUTPUT"
           else
-            # PNG は無かったが未追跡ファイル自体はある場合、理由を明示する。
+            # PNG は無かったが未追跡ファイル自体はある場合、事実を残す。
             # 黙って次のステップの exit 1 へ落ちると「なぜ自動コミットされないのか」が
-            # ログから読み取れず、再実行しても赤のまま原因不明になる
-            # （PNG 以外のスナップショットを使い始めたときにここへ来る）。
+            # ログから読み取れず、再実行しても赤のまま原因不明になる。
+            # ここへ来る原因は主に 2 つ（中断した実行が残した一時ファイル／PNG 以外の
+            # スナップショットを使い始めた）で、ログからは区別できない。取るべき対応が
+            # 正反対（前者は無視・後者は pathspec の見直し）なので、警告では
+            # 対処を指示せず、判断材料としてファイル名だけを出す。
             # git の実行結果はいったん変数へ受ける。if の条件式の中で "$(...)" を書くと、
             # git 自体が失敗しても「出力が空」に見えるだけで set -e が働かず、
             # 警告を出さないまま次のステップの exit 1 へ落ちてしまう（原因不明の赤に戻る）。
             # 単独の代入文にしておけば、git が失敗した時点でこのステップが止まる。
-            leftover_untracked="$(git ls-files --others --exclude-standard -- 'e2e/visual.spec.ts-snapshots/')"
+            leftover_untracked="$(git ls-files --others --exclude-standard -- "$SNAPSHOT_DIR")"
             # -n は中身が空でないことの判定（＝PNG 以外の未追跡ファイルが残っている）
             if [ -n "$leftover_untracked" ]; then
-              echo "::warning::新規の未追跡ファイルはありますが PNG ではないため自動コミットしません。PNG 以外のスナップショットを扱うなら、このステップの pathspec を広げてください（MERGEABLE_EXTRA_PATHS は e2e/visual.spec.ts-snapshots/ をディレクトリごと許可しているため、同じディレクトリ内であれば変更不要です）。"
+              # ファイル名をそのまま ::warning:: に差し込むと、名前に含まれる % や :: が
+              # GitHub のアノテーション記法として解釈され、偽のログコマンドを注入できる。
+              # update-portfolio-data.yml の escape_annotation と同じ規則で無害化する
+              # （記号を percent-encode し、改行は 1 行に収まるよう空白へ潰す）。
+              # sed は文字列の置換、tr は文字の置換を行うコマンド。
+              safe_list="$(printf '%s' "$leftover_untracked" \
+                | sed -e 's/%/%25/g' -e 's/\r/%0D/g' -e 's/::/%3A%3A/g' | tr '\n' ' ')"
+              echo "::warning::${SNAPSHOT_DIR} に未追跡ファイルがありますが PNG ではないため自動コミットの対象外です: ${safe_list}"
             fi
           fi
 
@@ -169,9 +184,10 @@ jobs:
         # 一度も比較検証されない。初回生成物をそのまま基準にする運用上の割り切りであり、
         # 「次の実行で検証される」わけではない点に注意する。
         # もう 1 つの帰結として、push 後の先端コミットにはチェック結果が 1 件も付かない。
-        # update-portfolio-data.yml は mergeStateStatus が CLEAN のときだけ取り込むため、
-        # 必須チェックが設定されていると日次データ更新 PR はその日は取り込まれずに残る
-        # （翌日の実行が最新の main から作り直すので、通常は放置しても自然に解消する）。
+        # 必須チェックを見て取り込みを決める仕組みは、この先端を「まだ通っていない」と扱う。
+        # 日次データ更新 PR がこれに当たった場合にどう扱われるかは
+        # update-portfolio-data.yml 側の判断なので、ここでは方針を書き写さない
+        # （書き写すと片方だけ変わったときに、こちらの記述だけが古くなる）。
         # 既存スナップショットとの差分（実際のリグレッション）の場合は失敗を伝播する。
         if: steps.playwright.outcome == 'failure' && steps.autocommit.outputs.committed != 'true'
         run: exit 1

@@ -135,11 +135,11 @@ jobs:
             ];
 
             // 1 リポジトリ分のライブデータを取得する。失敗したら null を返し、呼び出し側で前回値を使う
-            async function fetchRepo(t) {
-              // 前回の値。項目ごとの取得が失敗したときの引き継ぎ元にする
-              // （取得全体が失敗したときに呼び出し側が行っている「前回値を保持し
-              //   stale を立てる」扱いを、項目ごとの失敗にも広げるため）
-              const prevRepo = prev.repos.find((r) => r.key === t.key) || {};
+            // t … 取得対象。prevRepo … 前回の値（項目ごとの取得が失敗したときの
+            // 引き継ぎ元）。prevRepo は呼び出し側が取得全体の失敗用に作るものと
+            // 同じ値を受け取る（同じ探索を 2 回書くと、キーの持ち方を変えたときに
+            // 片方だけ直して静かに食い違うため。CLAUDE.md §6 の DRY）。
+            async function fetchRepo(t, prevRepo) {
               // 一部でも取得できなかったか。立った場合は stale として正直に出す
               let degraded = false;
 
@@ -206,11 +206,19 @@ jobs:
                 }
                 // 該当する CI run が無い場合は ci = none のまま（古い run を流用せず正直に出す）
               } catch (e) {
-                // Actions が無効なリポジトリ等。none のまま返すと、上の「該当 run が
-                // 無いので正直に none」と区別が付かなくなる。取得できていないだけなので
-                // 前回値を保ち、degraded を立てて stale として出す
+                // Actions が無効なリポジトリ等。取得できていないだけなので、可能なら
+                // 前回値を保ち、degraded を立てて stale として出す。
+                // ただし引き継げるのは「前回と同じコミットを表示している」ときだけ。
+                // コミットが進んでいるのに前回の結論を貼ると、別コミットに対する
+                // 成功 run を今日のコミットの緑バッジとして出すことになり、
+                // 上の (a) が防いでいる自己矛盾そのものになる（stale は
+                // 「（更新待ち）」の表示だけで、バッジ自体を打ち消さない）。
+                // 引き継げない場合は none のまま＝中立の「CI 情報なし」を出す。
                 core.warning(`${t.key}: workflow runs 取得失敗: ${e.message}`);
-                if (prevRepo.ci) ci = prevRepo.ci;
+                const prevSha7 = prevRepo.last_commit && prevRepo.last_commit.sha7;
+                if (prevRepo.ci && prevSha7 && prevSha7 === last_commit.sha7) {
+                  ci = prevRepo.ci;
+                }
                 degraded = true;
               }
 
@@ -272,7 +280,8 @@ jobs:
             for (const t of TARGETS) {
               const fallback = prev.repos.find((r) => r.key === t.key) || { key: t.key };
               try {
-                repos.push(await fetchRepo(t));
+                // 項目ごとの失敗でも前回値へ戻せるよう、同じ fallback を渡す
+                repos.push(await fetchRepo(t, fallback));
               } catch (e) {
                 core.warning(`${t.key}: 取得全体に失敗、前回値を保持: ${e.message}`);
                 repos.push({ ...fallback, stale: true });

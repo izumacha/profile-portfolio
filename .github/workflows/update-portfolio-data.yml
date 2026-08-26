@@ -136,6 +136,13 @@ jobs:
 
             // 1 リポジトリ分のライブデータを取得する。失敗したら null を返し、呼び出し側で前回値を使う
             async function fetchRepo(t) {
+              // 前回の値。項目ごとの取得が失敗したときの引き継ぎ元にする
+              // （取得全体が失敗したときに呼び出し側が行っている「前回値を保持し
+              //   stale を立てる」扱いを、項目ごとの失敗にも広げるため）
+              const prevRepo = prev.repos.find((r) => r.key === t.key) || {};
+              // 一部でも取得できなかったか。立った場合は stale として正直に出す
+              let degraded = false;
+
               // 既定ブランチ名を取得（main/master 揺れに対応）
               const repoInfo = await github.rest.repos.get({ owner: t.owner, repo: t.repo });
               const branch = repoInfo.data.default_branch;
@@ -199,8 +206,12 @@ jobs:
                 }
                 // 該当する CI run が無い場合は ci = none のまま（古い run を流用せず正直に出す）
               } catch (e) {
-                // Actions が無効なリポジトリ等。CI は none のまま
+                // Actions が無効なリポジトリ等。none のまま返すと、上の「該当 run が
+                // 無いので正直に none」と区別が付かなくなる。取得できていないだけなので
+                // 前回値を保ち、degraded を立てて stale として出す
                 core.warning(`${t.key}: workflow runs 取得失敗: ${e.message}`);
+                if (prevRepo.ci) ci = prevRepo.ci;
+                degraded = true;
               }
 
               // 言語構成を取得し、バイト数の多い順に上位を並べる
@@ -211,7 +222,11 @@ jobs:
                   .sort((a, b) => b[1] - a[1])
                   .map(([name]) => name);
               } catch (e) {
+                // 取得できなかっただけで「言語が無い」わけではない。空配列で上書きすると
+                // カードから言語が消えた状態が検証できた日と見分けられなくなる
                 core.warning(`${t.key}: languages 取得失敗: ${e.message}`);
+                languages = prevRepo.languages || [];
+                degraded = true;
               }
 
               // 既定ブランチの Git ツリーを再帰取得し、テストらしきファイル数を概算する
@@ -230,18 +245,25 @@ jobs:
                   (n) => n.type === "blob" && (re.test(n.path) || re2.test(n.path)),
                 ).length;
               } catch (e) {
+                // null のまま返すとテスト数バッジが消え、「テストが無いリポジトリ」と
+                // 見分けられなくなるため、前回値を保つ
                 core.warning(`${t.key}: tree 取得失敗: ${e.message}`);
+                test_file_count = prevRepo.test_file_count ?? null;
+                degraded = true;
               }
 
               return {
                 key: t.key,
-                name: (prev.repos.find((r) => r.key === t.key) || {}).name || t.repo,
+                name: prevRepo.name || t.repo,
                 url: `https://github.com/${t.owner}/${t.repo}`,
                 ci,
                 last_commit,
                 languages,
                 test_file_count,
-                stale: false,
+                // 一部でも取得できていない日を「検証できた日」と同じ見た目にしない。
+                // 取得全体が失敗したときに呼び出し側が立てるのと同じ目印を、
+                // 項目ごとの失敗にも広げる（index.html では「（更新待ち）」の表示になる）
+                stale: degraded,
               };
             }
 
@@ -740,14 +762,20 @@ jobs:
           # 見たいのは「古い内容のまま取り込まれないこと」なので、包含していれば十分。
           pr_head_contains_pushed() {
               local head="$1"
-              # 失敗理由はこの呼び出しの結果だけを表すよう冒頭で毎回リセットする。
-              # 残したままだと、過去の試行の一時的な通信エラーがその後の状態を覆い隠し、
-              # 実際は「先端が古い / まだ読めていない」のに通信・認証の問題として誤報してしまう
-              head_fetch_error=""
-              # まだ読めていない場合は追いついていない扱い
+              # まだ読めていない場合は追いついていない扱い。
+              # ここでは失敗理由に触らない: 先端が読めていない試行は fetch を試して
+              # すらいないので、直前の試行が記録した理由を消す資格が無い。
+              # 消してしまうと、認証切れで fetch に失敗し続けたあと最終試行だけ
+              # PR を読めなかった日に理由が失われ、後段が「先端が push したコミットを
+              # 含んでいません」＝内容が古い、と実際とは違う原因を報告してしまう。
               if [ -z "$head" ]; then
                   return 1
               fi
+              # 以降は実際に fetch を試すので、失敗理由はこの呼び出しの結果だけを
+              # 表すようリセットする。残したままだと、過去の試行の一時的な通信エラーが
+              # その後の状態を覆い隠し、実際は「先端が古い」のに通信・認証の問題として
+              # 誤報してしまう
+              head_fetch_error=""
               # 同一コミットなら追加の問い合わせは不要
               if [ "$head" = "$PUSHED_SHA" ]; then
                   return 0

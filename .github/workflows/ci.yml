@@ -64,13 +64,13 @@ jobs:
       # ワークフローレベルでなくジョブレベルに置くのは、使うのがこのジョブだけであり
       # 他ジョブの全ステップへ渡す必要がないため（§9 最小公開）。
       SNAPSHOT_DIR: e2e/visual.spec.ts-snapshots/
+      # 以下 2 つはどちらも .gitignore に同じ名前を書いてある。あちらは変数を
+      # 使えないので、名前を変えるときは .gitignore も必ず併せて直すこと。
       # 再実行の出力先。既定の test-results/ と分けて 1 回目の証跡を守る。
-      # 書き出し（--output）と アーティファクトの path で使うため env に置く（§6 一元管理）。
+      # 書き出し（--output）とアーティファクトの path の 2 か所で使う（§6 一元管理）。
       RECHECK_OUTPUT_DIR: test-results-recheck
       # 自動コミットの対象外だった未追跡ファイルの一覧を書き出す先。
       # 書き出し・警告文・アーティファクトの path の 3 か所で使う（同上）。
-      # この 2 つは .gitignore にも同じ名前を書いてある（あちらは変数を使えないため、
-      # 名前を変えるときは .gitignore も併せて直す）。
       UNTRACKED_LIST_FILE: untracked-snapshot-files.txt
     steps:
       # head_ref（PR ブランチ名）を明示して checkout することで、
@@ -234,8 +234,10 @@ jobs:
         # (2) 最終判定がこの再実行の結果だけで決まるため、1 回目の失敗が
         #     打ち消されうる。playwright.config.ts は CI で retries: 2（＝3 回試行）
         #     なので、1 回目に 3 回とも落ちたテストが再実行で通れば、そのテストは
-        #     赤にならない。実質「自動コミットが起きた実行に限り、6 回試行して
-        #     1 度でも通れば合格」という緩和になる。既に retries で
+        #     赤にならない。逆に 1 回目で通ったテストが再実行で 3 回とも落ちれば
+        #     赤になる（1 回目の結果は引き継がれない）。つまり「6 回中 1 度通れば
+        #     合格」ではなく、「合否は再実行の 3 回だけで決まる」。
+        #     フレークしたテストの結果が入れ替わりうるという意味で、既に retries で
         #     「3 回に 1 度通れば合格」としている方針の延長であり、
         #     ベースラインが生成された実行（新しいスクショを足した PR）でしか
         #     起きないため許容している。ここを厳しくするなら、1 回目の失敗が
@@ -246,7 +248,15 @@ jobs:
         # 丸ごと消してから始めるため、既定の test-results/ のまま 2 回目を走らせると
         # 1 回目の trace やスクリーンショットが消え、失敗した実行の証拠が
         # アーティファクトに残らなくなる（このディレクトリは下の upload 対象）。
-        run: npm run test:e2e -- --output="$RECHECK_OUTPUT_DIR"
+        # set -u を付けるのは、RECHECK_OUTPUT_DIR が未定義だったときに黙って
+        # 既定の test-results/ へ戻らないようにするため。GitHub の既定シェルは
+        # bash -e で -u が無いため、env の名前を変え忘れると空文字に展開され
+        # --output= となる。Playwright はこれを「指定なし」と解釈して既定の
+        # 出力先を使うので、上のコメントが防ごうとしている「1 回目の証跡が消える」
+        # 状態へ無警告で戻ってしまう。-u ならその場で止まる。
+        run: |
+          set -euo pipefail
+          npm run test:e2e -- --output="$RECHECK_OUTPUT_DIR"
         # ここで落ちても最終判定は次のステップに任せる（このステップ自体は赤にしない）
         continue-on-error: true
 
@@ -274,11 +284,6 @@ jobs:
         # 実行ステップ」とだけ書く。
         run: |
           echo "::error::ビジュアルリグレッションテストが失敗しました。上の Playwright の実行ステップのログを確認してください。"
-          # 自動コミットが動く範囲は SNAPSHOT_DIR の中だけなので、別の spec が
-          # スクリーンショットを撮り始めた場合はベースラインが生成されても
-          # 自動コミットされず、対象外の警告も出ない（範囲外のため数にも入らない）。
-          # 心当たりがないまま赤が続くときの手がかりとして書いておく。
-          echo "新しい spec がスクリーンショットを撮り始めた場合は、このジョブの env SNAPSHOT_DIR が対象にしているディレクトリの外にベースラインが作られている可能性があります。"
           exit 1
 
       # On failure, upload the (re)generated snapshots and the Playwright diff
@@ -288,6 +293,12 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: playwright-snapshots
+        # path: は | のブロックスカラーなので、この中に # を書くとコメントではなく
+        # パスとして扱われる。注記は必ずこの位置（ブロックの外）に書く。
+        # test-results/ は 1 回目の出力先で、playwright.config.ts が outputDir を
+        # 指定していないときの既定値。こちらでは決めていないので、あちらで
+        # outputDir を設定したらここも併せて直す
+        # （一致しないと失敗の証跡が黙って空になる）。
           path: |
             e2e/**/*.png
             test-results/

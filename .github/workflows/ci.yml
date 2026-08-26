@@ -50,6 +50,19 @@ jobs:
     # スナップショットが存在しない場合にベースラインを自動コミットするため write が必要
     permissions:
       contents: write
+    env:
+      # Playwright のベースライン画像が置かれるディレクトリ。
+      # 下のステップで複数回参照するため、書き写さず 1 か所で持つ（§6 一元管理）。
+      # 参照側で "${SNAPSHOT_DIR%/}/" と正規化するので、末尾の / の有無は問わない。
+      # spec ごとに <spec 名>-snapshots/ が作られるため、2 本目の spec が
+      # スクリーンショットを撮るようになったらここを見直す。
+      # このパスは update-portfolio-data.yml の MERGEABLE_EXTRA_PATHS の内側に
+      # 収まっている必要がある（自動コミット先の更新ブランチは日次データ更新 PR の
+      # head でもあり、許可リストに無いパスが載るとその日の更新が止まるため）。
+      # したがって、狭める分には単独で変えてよく、広げるときだけ許可リスト側も併せて広げる。
+      # ワークフローレベルでなくジョブレベルに置くのは、使うのがこのジョブだけであり
+      # 他ジョブの全ステップへ渡す必要がないため（§9 最小公開）。
+      SNAPSHOT_DIR: e2e/visual.spec.ts-snapshots/
     steps:
       # head_ref（PR ブランチ名）を明示して checkout することで、
       # デタッチ HEAD でなくブランチとして取得し git push を可能にする
@@ -93,29 +106,155 @@ jobs:
         run: |
           # 未定義変数・コマンド失敗・パイプ失敗を即時エラーとして検出する（セキュリティ上の best practice）
           set -euo pipefail
-          # 未追跡の PNG = スナップショットが存在しなかったため新規生成されたファイル
-          NEW=$(git ls-files --others --exclude-standard -- 'e2e/visual.spec.ts-snapshots/')
-          if [ -n "$NEW" ]; then
+          # 未追跡の PNG = スナップショットが存在しなかったため新規生成されたファイル。
+          # 一覧は NULL 区切りのままファイルへ受け、シェル変数を経由させない。
+          # 変数に入れて `printf '%s\0' $NEW` のように展開すると、NULL 区切りにする前に
+          # シェルが空白で単語分割してしまい、"my snap.png" が 2 つの引数に割れる
+          # （空白を含む名前も安全に扱う、という当初の意図が果たせていなかった）。
+          # 一覧を受け取る一時ファイルを作る
+          new_snapshots="$(mktemp)"
+          # ステップ終了時に一時ファイルを消す（失敗して途中で抜けても残さない）
+          trap 'rm -f "$new_snapshots"' EXIT
+          # 対象ディレクトリは SNAPSHOT_DIR（このジョブの env で 1 か所定義）。
+          # ${SNAPSHOT_DIR%/} は「末尾に / があれば取り除く」書き方。そのうえで / を足すため、
+          # env 側が末尾 / を付け忘れても pathspec が兄弟ディレクトリへ広がらない
+          # （末尾 / が無いと e2e/...-snapshots*.png となり -snapshots-old/ 等にも当たる）。
+          snapshot_dir="${SNAPSHOT_DIR%/}/"
+          # 拡張子まで絞る。ディレクトリ指定のままだと、中断した実行が残した一時ファイル等
+          # PNG 以外の未追跡ファイルまで「ベースライン自動生成」という件名でコミットされる。
+          # そのパスは MERGEABLE_EXTRA_PATHS のディレクトリ前方一致にも該当するため、
+          # 日次データ更新 PR の許可判定も素通りしてしまう。ここで絞るのは
+          # 「この自動コミットが PNG 以外を持ち込まない」ことの保証であり、
+          # 許可リスト側は前方一致のままなので、別経路で置かれたファイルまでは防げない
+          # （許可リストがパターンを書けるようになるまでの、入口側の一次防御）。
+          # * はダブルクォートの中ではシェルに展開されず、git へそのまま渡って
+          # git 側のパターンとして解釈される（意図どおり）。
+          git ls-files -z --others --exclude-standard -- "${snapshot_dir}*.png" > "$new_snapshots"
+
+          # 自動コミットの対象外になる未追跡ファイル（＝PNG 以外）の件数を数える。
+          # これは PNG が 1 枚でも生成されたかどうかとは独立した事実なので、
+          # コミット処理より前に、かつ if の外で報告する。
+          # コミットの中で報告すると、新規 PNG と PNG 以外が同時に出た日や
+          # push に失敗した日に、取りこぼしを誰にも知らせないまま終わってしまう。
+          # 数え方は「ディレクトリ全体の未追跡数 − 上で拾った PNG 数」。
+          # ":(exclude)" で PNG を除いた一覧を別に引くこともできるが、それだと
+          # 上の pathspec と常に正確な裏返しであり続ける必要があり、片方だけ直すと
+          # どちらにも入らないファイルが生まれる（＝黙って消える）。引き算なら
+          # 参照する pathspec が 1 つで済み、そのずれ自体が起こらない。
+          # git の実行結果はいったん変数へ受ける。if の条件式の中で "$(...)" を書くと、
+          # git 自体が失敗しても「出力が空」に見えるだけで set -e が働かず、
+          # 何も知らせないまま次のステップの exit 1 へ落ちてしまう（原因不明の赤に戻る）。
+          # 単独の代入文にしておけば、git が失敗した時点でこのステップが止まる。
+          # 名前に改行を含むファイルも git が \n の 2 文字へ変換するため 1 件 1 行になる。
+          untracked_total="$(git ls-files --others --exclude-standard -- "$snapshot_dir" | wc -l)"
+          # tr -cd '\0' は NULL 文字だけを残す指定。その byte 数が PNG の件数になる
+          new_png_count="$(tr -cd '\0' < "$new_snapshots" | wc -c)"
+          skipped_count=$(( untracked_total - new_png_count ))
+          # 対象外が 1 件でもあれば、その事実を残す。何も言わずに次のステップの exit 1 へ
+          # 落ちると「なぜ自動コミットされないのか」がログから読み取れず、再実行しても
+          # 赤のまま原因不明になる。原因は主に 2 つ（中断した実行が残した一時ファイル／
+          # PNG 以外のスナップショットを使い始めた）で、取るべき対応は正反対
+          # （前者は無視・後者は SNAPSHOT_DIR と pathspec の見直し）。ログからは
+          # 区別できないので、対処は指示せず、件数と一覧という判断材料だけを渡す。
+          # ファイル名はアノテーションに差し込まず、ファイルへ書き出してアーティファクトで渡す。
+          # ログへ差し込むと、名前に含まれる :: や ##[ が GitHub のログコマンド記法として
+          # 解釈され、偽のコマンドを注入できる（どちらの記法も行頭の空白を無視したり
+          # 行の途中でも拾ったりするため、前置きを足す程度では防げない）。無害化を書けば
+          # update-portfolio-data.yml の escape_annotation と同じ規則の写しが増える。
+          # ファイルの中身はログコマンドとして解釈されないので、この形なら無害化が要らない。
+          # 手元の git status では分からない点に注意する。これらは CI の作業領域にだけ
+          # 存在するファイルで、ローカルには無い（だから一覧を持ち帰れるようにする）。
+          # -c core.quotePath=false は非 ASCII 名を 8 進エスケープでなくそのまま出す指定
+          if [ "$skipped_count" -gt 0 ]; then
+            # 書き出すのはディレクトリ内の未追跡ファイル全部（コミットする PNG も含む）。
+            # PNG だけを除いた一覧にするには裏返しの pathspec が要り、上の pathspec と
+            # 常に正確な補集合であり続ける必要が出る。全部を出せば参照する pathspec は
+            # 1 つのままで、読む側は拡張子で見分けられる。
+            git -c core.quotePath=false ls-files --others --exclude-standard \
+              -- "$snapshot_dir" > untracked-snapshot-files.txt
+            echo "::warning::${snapshot_dir} に PNG 以外の未追跡ファイルが ${skipped_count} 件あります（自動コミットの対象外）。同ディレクトリの未追跡ファイル一覧（コミットする PNG も含む）はアーティファクト playwright-snapshots の untracked-snapshot-files.txt を参照してください（CI の作業領域にだけ存在するため手元の git status には出ません）。"
+          fi
+          # 新規スナップショットが 1 件以上あるときだけコミットする。
+          # 判定には上で数えた件数をそのまま使う（ファイルの空判定 -s と二重に持たない）
+          if [ "$new_png_count" -gt 0 ]; then
             # bot として git の作者情報を設定する
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
-            # 新規スナップショット（未追跡ファイル）だけをステージする
+            # 新規スナップショット（未追跡ファイル）だけをステージする。
             # git add e2e/... で全体を add すると既存の差分（リグレッション）も混入するため
-            # $NEW に列挙された個別ファイルだけを add する
-            # ファイル名にスペースや特殊文字が含まれる場合も安全に処理するため NULL 区切りを使用する
-            printf '%s\0' $NEW | xargs -0 git add --
+            # 列挙された個別ファイルだけを add する。
+            # 一覧は git に直接読ませる（xargs 経由だと引数長の上限で git add が複数回に
+            # 分割され、途中で失敗したとき一部だけステージされた状態になる）。
+            # --literal-pathspecs は「一覧の各行をパターンでなく、そのままのファイル名として扱う」指定。
+            # --pathspec-file-nul が無効にするのは引用符や空白での区切り方だけで、
+            # * ? [ ] といったパターン記号としての意味は残る。たとえば新規ファイルが
+            # "hero[1]-linux.png" だと [1] が「1 という文字のどれか」と解釈され、
+            # すでに追跡されている hero1-linux.png（＝実際のリグレッション差分を抱えた既存
+            # ベースライン）まで一致してステージされてしまう。それでは上の
+            # 「既存の差分を混入させない」という前提が崩れるため、パターン解釈を止める。
+            # なお上の git ls-files 側は *.png というパターンで絞る必要があるので付けない
+            # （付けるとその行の * も文字どおりの記号として扱われ、1 件も一致しなくなる）。
+            git --literal-pathspecs add --pathspec-from-file="$new_snapshots" --pathspec-file-nul
             git commit -m "chore(e2e): Playwright ベースラインスナップショットを自動生成"
             # push 失敗はサイレントに通過させない（|| exit 1 で CI を即時失敗させる）
             git push || exit 1
-            # 次のステップで「自動コミット済み」と判定するために出力する
+            # 次のステップで「自動コミットした」と判定するために出力する
             echo "committed=true" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: ベースライン追加後にテストを再実行して確認
+        # 自動コミットが起きたときだけ走る。
+        # 「今回の失敗はベースラインが無かったせいだけだった」ことを、テストの結果
+        # そのもので確かめるステップ。欠けていたベースラインが埋まっただけなら通る。
+        #
+        # ワークツリーの状態（git diff）を見る判定では代用できない。Playwright は
+        # 既存ベースラインとの不一致時、差分画像を test-results/（gitignore 対象）へ
+        # 書くだけで、追跡済みのベースラインは書き換えないため（書き換えるのは
+        # --update-snapshots を changed / all で走らせたときだけで、既定は missing）。
+        # つまり差分は常に空に見え、その手の判定は素通りする。
+        #
+        # npm run test:e2e は e2e/ 配下すべて（スナップショットを使わない
+        # sections.spec.ts の機能テストを含む）を走らせるので、ベースラインが 1 枚
+        # 欠けているだけでそれらの失敗まで見逃す、という取りこぼしも同時に塞げる。
+        #
+        # 判定をシェルの中でなく独立したステップの成否に持たせているのは、
+        # Actions の画面でログを開かずに結果が見えるようにするため。
+        # 代償として、自動コミットが起きた実行に限り e2e が 2 回走る。
+        id: playwright-recheck
+        if: steps.autocommit.outputs.committed == 'true'
+        # --output で出力先を分ける。Playwright は実行のたびに出力先ディレクトリを
+        # 丸ごと消してから始めるため、既定の test-results/ のまま 2 回目を走らせると
+        # 1 回目の trace やスクリーンショットが消え、失敗した実行の証拠が
+        # アーティファクトに残らなくなる（このディレクトリは下の upload 対象）。
+        run: npm run test:e2e -- --output=test-results-recheck
+        # ここで落ちても最終判定は次のステップに任せる（このステップ自体は赤にしない）
+        continue-on-error: true
+
       - name: ビジュアルリグレッション失敗を伝播（自動生成以外の失敗のみ）
-        # スナップショットが自動コミットされた場合は次の CI 実行で検証するため現行ジョブは通す。
-        # 既存スナップショットとの差分（実際のリグレッション）の場合は失敗を伝播する。
-        if: steps.playwright.outcome == 'failure' && steps.autocommit.outputs.committed != 'true'
-        run: exit 1
+        # 通してよいのは「自動コミットが起きて、かつ再実行が通った」ときだけ。
+        # 再実行が通った＝今回の失敗はベースラインの欠落だけが原因だったということ。
+        # ただし確認できるのは「そのベースラインが再現する」ことまでで、
+        # 「その見た目が正しい」かどうかは人のレビューでしか分からない。
+        # 注意: 自動コミットの push は secrets.GITHUB_TOKEN で行うため、GitHub の仕様により
+        # 新しいワークフロー実行はトリガーされない（同リポジトリの
+        # update-portfolio-data.yml も同じ事実を前提にしている）。
+        # もう 1 つの帰結として、push 後の先端コミットにはチェック結果が 1 件も付かない。
+        # 必須チェックを見て取り込みを決める仕組みは、この先端を「まだ通っていない」と扱う。
+        # 日次データ更新 PR がこれに当たった場合にどう扱われるかは
+        # update-portfolio-data.yml 側の判断なので、ここでは方針を書き写さない
+        # （書き写すと片方だけ変わったときに、こちらの記述だけが古くなる）。
+        if: >
+          steps.playwright.outcome == 'failure' &&
+          (steps.autocommit.outputs.committed != 'true' ||
+           steps.playwright-recheck.outcome == 'failure')
+        # 失敗の中身は上の Playwright 実行ステップのログに出ているので、ここでは
+        # 原因を断定しない（断定すると、実際は別の原因だったときに誤った案内になる）。
+        # 再実行ステップは自動コミットが起きなかったときは skip され、ログを持たない。
+        # 名指しすると存在しないログへ誘導することになるため「上の Playwright の
+        # 実行ステップ」とだけ書く。
+        run: |
+          echo "::error::ビジュアルリグレッションテストが失敗しました。上の Playwright の実行ステップのログを確認してください。"
+          exit 1
 
       # On failure, upload the (re)generated snapshots and the Playwright diff
       # report so baselines can be refreshed when the layout changes.
@@ -127,5 +266,7 @@ jobs:
           path: |
             e2e/**/*.png
             test-results/
+            test-results-recheck/
+            untracked-snapshot-files.txt
           retention-days: 7
           if-no-files-found: ignore

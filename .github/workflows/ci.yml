@@ -52,7 +52,8 @@ jobs:
       contents: write
     env:
       # Playwright のベースライン画像が置かれるディレクトリ。
-      # 下のステップで複数回参照するため、書き写さず 1 か所で持つ（§6 一元管理）。
+      # env に置く理由は「複数回使うから」ではなく（展開はステップ内の 1 か所だけ）、
+      # 下に書く update-portfolio-data.yml との取り決めを、値のすぐ隣に残すため。
       # 参照側で "${SNAPSHOT_DIR%/}/" と正規化するので、末尾の / の有無は問わない。
       # spec ごとに <spec 名>-snapshots/ が作られるため、2 本目の spec が
       # スクリーンショットを撮るようになったらここを見直す。
@@ -63,6 +64,14 @@ jobs:
       # ワークフローレベルでなくジョブレベルに置くのは、使うのがこのジョブだけであり
       # 他ジョブの全ステップへ渡す必要がないため（§9 最小公開）。
       SNAPSHOT_DIR: e2e/visual.spec.ts-snapshots/
+      # 再実行の出力先。既定の test-results/ と分けて 1 回目の証跡を守る。
+      # 書き出し（--output）と アーティファクトの path で使うため env に置く（§6 一元管理）。
+      RECHECK_OUTPUT_DIR: test-results-recheck
+      # 自動コミットの対象外だった未追跡ファイルの一覧を書き出す先。
+      # 書き出し・警告文・アーティファクトの path の 3 か所で使う（同上）。
+      # この 2 つは .gitignore にも同じ名前を書いてある（あちらは変数を使えないため、
+      # 名前を変えるときは .gitignore も併せて直す）。
+      UNTRACKED_LIST_FILE: untracked-snapshot-files.txt
     steps:
       # head_ref（PR ブランチ名）を明示して checkout することで、
       # デタッチ HEAD でなくブランチとして取得し git push を可能にする
@@ -171,8 +180,8 @@ jobs:
             # 常に正確な補集合であり続ける必要が出る。全部を出せば参照する pathspec は
             # 1 つのままで、読む側は拡張子で見分けられる。
             git -c core.quotePath=false ls-files --others --exclude-standard \
-              -- "$snapshot_dir" > untracked-snapshot-files.txt
-            echo "::warning::${snapshot_dir} に PNG 以外の未追跡ファイルが ${skipped_count} 件あります（自動コミットの対象外）。同ディレクトリの未追跡ファイル一覧（コミットする PNG も含む）はアーティファクト playwright-snapshots の untracked-snapshot-files.txt を参照してください（CI の作業領域にだけ存在するため手元の git status には出ません）。"
+              -- "$snapshot_dir" > "$UNTRACKED_LIST_FILE"
+            echo "::warning::${snapshot_dir} に PNG 以外の未追跡ファイルが ${skipped_count} 件あります（自動コミットの対象外）。同ディレクトリの未追跡ファイル一覧（コミットする PNG も含む）はアーティファクト playwright-snapshots の ${UNTRACKED_LIST_FILE} を参照してください（CI の作業領域にだけ存在するため手元の git status には出ません）。"
           fi
           # 新規スナップショットが 1 件以上あるときだけコミットする。
           # 判定には上で数えた件数をそのまま使う（ファイルの空判定 -s と二重に持たない）
@@ -219,14 +228,25 @@ jobs:
         #
         # 判定をシェルの中でなく独立したステップの成否に持たせているのは、
         # Actions の画面でログを開かずに結果が見えるようにするため。
-        # 代償として、自動コミットが起きた実行に限り e2e が 2 回走る。
+        #
+        # 代償が 2 つある。
+        # (1) 自動コミットが起きた実行に限り e2e が 2 回走る（時間が延びる）。
+        # (2) 最終判定がこの再実行の結果だけで決まるため、1 回目の失敗が
+        #     打ち消されうる。playwright.config.ts は CI で retries: 2（＝3 回試行）
+        #     なので、1 回目に 3 回とも落ちたテストが再実行で通れば、そのテストは
+        #     赤にならない。実質「自動コミットが起きた実行に限り、6 回試行して
+        #     1 度でも通れば合格」という緩和になる。既に retries で
+        #     「3 回に 1 度通れば合格」としている方針の延長であり、
+        #     ベースラインが生成された実行（新しいスクショを足した PR）でしか
+        #     起きないため許容している。ここを厳しくするなら、1 回目の失敗が
+        #     すべて「ベースライン欠落」だったことを別途確かめる必要がある。
         id: playwright-recheck
         if: steps.autocommit.outputs.committed == 'true'
         # --output で出力先を分ける。Playwright は実行のたびに出力先ディレクトリを
         # 丸ごと消してから始めるため、既定の test-results/ のまま 2 回目を走らせると
         # 1 回目の trace やスクリーンショットが消え、失敗した実行の証拠が
         # アーティファクトに残らなくなる（このディレクトリは下の upload 対象）。
-        run: npm run test:e2e -- --output=test-results-recheck
+        run: npm run test:e2e -- --output="$RECHECK_OUTPUT_DIR"
         # ここで落ちても最終判定は次のステップに任せる（このステップ自体は赤にしない）
         continue-on-error: true
 
@@ -254,6 +274,11 @@ jobs:
         # 実行ステップ」とだけ書く。
         run: |
           echo "::error::ビジュアルリグレッションテストが失敗しました。上の Playwright の実行ステップのログを確認してください。"
+          # 自動コミットが動く範囲は SNAPSHOT_DIR の中だけなので、別の spec が
+          # スクリーンショットを撮り始めた場合はベースラインが生成されても
+          # 自動コミットされず、対象外の警告も出ない（範囲外のため数にも入らない）。
+          # 心当たりがないまま赤が続くときの手がかりとして書いておく。
+          echo "新しい spec がスクリーンショットを撮り始めた場合は、このジョブの env SNAPSHOT_DIR が対象にしているディレクトリの外にベースラインが作られている可能性があります。"
           exit 1
 
       # On failure, upload the (re)generated snapshots and the Playwright diff
@@ -266,7 +291,7 @@ jobs:
           path: |
             e2e/**/*.png
             test-results/
-            test-results-recheck/
-            untracked-snapshot-files.txt
+            ${{ env.RECHECK_OUTPUT_DIR }}/
+            ${{ env.UNTRACKED_LIST_FILE }}
           retention-days: 7
           if-no-files-found: ignore

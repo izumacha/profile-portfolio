@@ -115,6 +115,14 @@ jobs:
         run: |
           # 未定義変数・コマンド失敗・パイプ失敗を即時エラーとして検出する（セキュリティ上の best practice）
           set -euo pipefail
+          # このステップが使う env を先頭で検査する。UNTRACKED_LIST_FILE は下の
+          # if の中でしか展開されないため、名前を間違えても「PNG 以外の未追跡
+          # ファイルが 0 件」の日は分岐に入らず気づけない。壊れているのが表面化
+          # するのは一覧が必要になった日で、そのとき警告は存在しないファイル名を
+          # 案内し、アーティファクトにも入っていない状態になる。
+          # ${VAR:?} は「未定義または空なら、そこで打ち切る」書き方。
+          # 先頭の : は「何もしない」コマンドで、検査だけを目的に置いている
+          : "${SNAPSHOT_DIR:?}" "${UNTRACKED_LIST_FILE:?}"
           # 未追跡の PNG = スナップショットが存在しなかったため新規生成されたファイル。
           # 一覧は NULL 区切りのままファイルへ受け、シェル変数を経由させない。
           # 変数に入れて `printf '%s\0' $NEW` のように展開すると、NULL 区切りにする前に
@@ -260,8 +268,11 @@ jobs:
           # 未定義変数・コマンド失敗・パイプ失敗を即時エラーとして検出する
           set -euo pipefail
           # ベースラインを足した状態で e2e をもう一度走らせる。
-          # --output で出力先を分け、1 回目の test-results/ を上書きさせない
-          npm run test:e2e -- --output="$RECHECK_OUTPUT_DIR"
+          # --output で出力先を分け、1 回目の test-results/ を上書きさせない。
+          # ${VAR:?} は「未定義または空なら、そこで打ち切る」書き方。
+          # set -u だけだと「定義されているが空」を素通しし、--output= が渡って
+          # Playwright に「指定なし」と解釈されてしまうため、: を付けて空も弾く
+          npm run test:e2e -- --output="${RECHECK_OUTPUT_DIR:?}"
         # ここで落ちても最終判定は次のステップに任せる（このステップ自体は赤にしない）
         continue-on-error: true
 
@@ -298,8 +309,6 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: playwright-snapshots
-        # path: は | のブロックスカラーなので、この中に # を書くとコメントではなく
-        # パスとして扱われる。注記は必ずこの位置（ブロックの外）に書く。
         # test-results/ は 1 回目の出力先で、playwright.config.ts が outputDir を
         # 指定していないときの既定値。こちらでは決めていないので、あちらで
         # outputDir を設定したらここも併せて直す

@@ -4,6 +4,10 @@ on:
   pull_request:
   push:
     branches: [main]
+  # CI ワークフロー側と同じ理由で手動実行を許す。ベースライン自動コミット後の
+  # HEAD にはどのワークフローもチェックを付けないため、必須ステータスチェックに
+  # このジョブが含まれている場合はここからも走らせ直せるようにしておく。
+  workflow_dispatch:
 
 permissions:
   contents: read

@@ -4,6 +4,17 @@ on:
   pull_request:
   push:
     branches: [main]
+  # 任意のブランチに対して手動で再実行できるようにする。
+  # visual-regression ジョブがベースラインを自動コミットすると、その push は
+  # GITHUB_TOKEN で行われるため GitHub の仕様で新しいワークフローを起動しない
+  # （自動コミットが自分自身を無限に呼び出すのを防ぐ仕様）。結果として PR の
+  # HEAD は「チェックが 1 つも無いコミット」になり、必須ステータスチェックを
+  # 設定しているとマージできないまま止まる。自動コミット自体は同じジョブ内の
+  # 「ベースライン追加後にテストを再実行して確認」で検証済みなので、
+  # 検証が無いわけではなく、チェックの付き先が古いコミットのままになるだけ。
+  # その場合はこの workflow_dispatch で HEAD に対して走らせ直す
+  # （Actions タブ → CI → Run workflow でブランチを選ぶ）。
+  workflow_dispatch:
 
 # ワークフローレベルの permissions は設定せず、各ジョブで最小権限を個別に指定する。
 # visual-regression ジョブはスナップショット自動コミットのため contents: write が必要。

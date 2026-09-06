@@ -24,7 +24,7 @@
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'sha256-CAQcfNO87doQ1n1nDsPk1atQ8LiVje7cw0qM0n4QeYo='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'"
+      content="default-src 'self'; script-src 'self' 'sha256-8Ym6SzxKMS718AqxOVTStPyjDV3oawIiLdxaPHucDSo='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'"
     />
     <meta name="referrer" content="strict-origin-when-cross-origin" />
 
@@ -2240,12 +2240,20 @@
                 // （＝また opaque な壊れ方）へ静かに戻る
                 const reposIsArray = Array.isArray(data && data.repos);
                 const repos = reposIsArray ? data.repos : [];
-                // repos があるのに配列でない場合は、その事実を知らせる（黙って空扱いにしない。§6）
-                if (!reposIsArray && data && data.repos) {
+                // 配列でなかったときは、その事実を知らせる（黙って空扱いにしない。§6）。
+                // **「repos が無い」と「repos はあるが配列でない」を書き分ける**。
+                // 一緒くたにすると、生成側が repos ごと落とした場合に下の missingKeys だけが
+                // 出て「data-repo-key の綴り違い」を疑わせてしまい、正しいカードのマークアップを
+                // 調べに行かせることになる（本当の原因は update-portfolio-data.yml の側）
+                if (!reposIsArray) {
                   console.error(
-                    "[portfolio] data/portfolio.json の repos が配列ではありません。" +
-                      "バッジは描画されません:",
-                    typeof data.repos,
+                    data && data.repos !== undefined
+                      ? "[portfolio] data/portfolio.json の repos が配列ではありません。" +
+                          "バッジは描画されません（型: " +
+                          typeof data.repos +
+                          "）"
+                      : "[portfolio] data/portfolio.json に repos がありません。" +
+                          "バッジは描画されません（生成側 .github/workflows/update-portfolio-data.yml を確認してください）",
                   );
                 }
                 const generatedAt = data && data.generated_at; // 生成日時
@@ -2286,8 +2294,11 @@
                 document.querySelectorAll(".work-card[data-repo-key]").forEach(function (card) {
                   const key = card.getAttribute("data-repo-key"); // 対応キーを取得
                   // JSON 側に同じキーの repo が無いカードを記録する（描画自体は下の renderCard が
-                  // 素のカードのままにする。キーの綴り違いや収集対象からの漏れがここに現れる）
-                  if (!byKey[key]) missingKeys.push(key);
+                  // 素のカードのままにする。キーの綴り違いや収集対象からの漏れがここに現れる）。
+                  // duplicateKeys と同じ理由で**重複は入れない**: カードをコピペして
+                  // data-repo-key を直し忘れると同じキーのカードが 2 枚できるので、
+                  // そのままだと「a, a」と並んで別々の綴り違いがあるように読めてしまう
+                  if (!byKey[key] && missingKeys.indexOf(key) === -1) missingKeys.push(key);
                   // 描画は **カード 1 枚ごと** に囲う。ループ全体を 1 つの try で囲うと、
                   // 1 件の壊れたデータで残り全部のバッジが道連れになって消える
                   try {

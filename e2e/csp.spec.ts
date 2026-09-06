@@ -51,6 +51,13 @@ const IGNORED_DIRS = readFileSync(join(REPO_ROOT, ".htmlvalidateignore"), "utf8"
   // "node_modules/" のような書き方から末尾の / を外してディレクトリ名にする
   .map((line) => line.replace(/\/$/, ""));
 
+// この導出が扱えるのは「単一のディレクトリ名」だけ。html-validate は gitignore の
+// 書式をひととおり解釈するので、`docs/legacy/` や `**/generated/` のような書き方を
+// されると **こちらだけが黙って無視して範囲がずれる**（構文検査はされるのに
+// CSP は検査されない、という状態がまさにこの網の防ぎたいもの）。
+// 黙ってずれるより落ちる方が良いので、扱えない書き方を見つけたら fail-closed にする
+const UNSUPPORTED_IGNORE_ENTRIES = IGNORED_DIRS.filter((e) => e.includes("/") || e.includes("*"));
+
 /**
  * 検査対象のページを **リポジトリの *.html から再帰で導出する**。
  *
@@ -80,9 +87,13 @@ function findPages(dir: string, prefix = ""): string[] {
       // このエントリの処理は終わり
       continue;
     }
-    // **通常のファイルであること**まで確かめる。`zzz.html` という名前のディレクトリが
-    // あると、それを開いた 404 応答には CSP が無いので「違反ゼロ」で緑になってしまう
-    if (entry.isFile() && entry.name.toLowerCase().endsWith(".html")) found.push(relative);
+    // 拡張子が .html でなければ対象外
+    if (!entry.name.toLowerCase().endsWith(".html")) continue;
+    // **実体が通常のファイルであること**まで確かめる。`zzz.html` という名前のディレクトリが
+    // あると、それを開いた 404 応答には CSP が無いので「違反ゼロ」で緑になってしまう。
+    // entry.isFile() だけで見るとシンボリックリンクが false になり、
+    // 配信はされるのに検査対象から黙って落ちるので、statSync で実体をたどる
+    if (statSync(join(dir, entry.name)).isFile()) found.push(relative);
   }
   // 見つかったページのパスを返す
   return found;
@@ -142,8 +153,11 @@ async function observePage(page: Page, path: string): Promise<PageObservation> {
     violations: (window as unknown as { __cspViolations: CspViolation[] }).__cspViolations,
     // CSP meta の中身。**HTML の解析はブラウザが済ませている**ので、
     // コメント内の meta や属性の並び・実体参照といった細部を自前で扱う必要がない
+    // **head の中だけを見る**。<body> に置かれた CSP meta はブラウザが無視するので、
+    // document 全体から探すと「効いていないポリシー」を「CSP がある」と読んでしまう
+    // （実際、body に偽ハッシュの meta を置いたページが両方のテストを素通りした）
     policy:
-      document
+      document.head
         .querySelector<HTMLMetaElement>('meta[http-equiv="Content-Security-Policy" i]')
         ?.getAttribute("content") ?? null,
     // ブラウザが JavaScript として扱うインライン script の数。
@@ -155,41 +169,57 @@ async function observePage(page: Page, path: string): Promise<PageObservation> {
 }
 
 test.describe("Content-Security-Policy", () => {
-  test("検査対象のページが 1 枚以上見つかっている", () => {
+  test("検査対象の導出が壊れていない", () => {
     // 導出が壊れて 0 件になると、下のループが 1 つもテストを作らず
     // 「違反ゼロ＝緑」に見えてしまう。導出そのものを fail-closed にする
     // (CI の html-validate も対象 0 件なら exit 1 で落ちる。挙動をそろえる)
     expect(PAGES.length, "リポジトリから HTML ページを 1 枚も導出できなかった").toBeGreaterThan(0);
+    // .htmlvalidateignore に、この導出が解釈できない書き方が入っていないこと。
+    // 黙って無視すると html-validate との範囲がずれる（上の定数のコメント参照）
+    expect(
+      UNSUPPORTED_IGNORE_ENTRIES,
+      ".htmlvalidateignore に、e2e/csp.spec.ts の導出が扱えない書き方があります" +
+        "（対応しているのは単一のディレクトリ名だけ）。findPages を拡張するか、書き方を単純にしてください",
+    ).toEqual([]);
   });
 
-  // 対象ページを 1 枚ずつ検証する
+  // 対象ページを 1 枚ずつ検証する。
+  // **1 ページにつき 1 回だけ開く**。以前は「違反ゼロ」と「方式の維持」を別テストにしていたが、
+  // どちらも同じ 1 回の観測から導ける事実なので、ページを 2 回開くのは待ち時間の二重払いだった
+  // （networkidle は Google Fonts の取得を待つので 1 回あたり十数秒かかる）。
+  // 独立した検査は expect.soft で並べ、1 つ落ちても残りの結果が見えるようにする
   for (const path of PAGES) {
-    test(`${path} は CSP 違反を 1 件も起こさない`, async ({ page }) => {
-      // ページを開いて観測する
-      const { violations } = await observePage(page, path);
+    test(`${path} の CSP が壊れていない`, async ({ page }) => {
+      // ページを開いて観測する（1 回だけ）
+      const { violations, policy, inlineScriptCount } = await observePage(page, path);
+
+      // --- 1. ブラウザが実際に何もブロックしていないこと ---
       // 失敗時に「何がブロックされたか」がそのまま読めるメッセージを組み立てる
       const detail = violations
         .map((v) => `${v.directive} が ${v.blockedURI} をブロック`)
         .join(" / ");
-      // 違反が 1 件でもあれば落とす。
       // script まわりの違反は「CSP の sha256 がインライン script と食い違っている」ことが
       // 圧倒的に多いので、直し方を失敗メッセージに添えておく
-      expect(
-        violations,
-        `${path} で CSP 違反が発生した: ${detail}\n` +
-          "インライン script を編集した場合は、index.html の CSP meta 内 script-src の\n" +
-          "sha256 を新しい本文のハッシュへ更新してください " +
-          "(DevTools のコンソールに必要な値が出ます)。",
-      ).toEqual([]);
-    });
+      expect
+        .soft(
+          violations,
+          `${path} で CSP 違反が発生した: ${detail}\n` +
+            "インライン script を編集した場合は、index.html の CSP meta 内 script-src の\n" +
+            "sha256 を新しい本文のハッシュへ更新してください " +
+            "(DevTools のコンソールに必要な値が出ます)。",
+        )
+        .toEqual([]);
 
-    test(`${path} は CSP の方式（ハッシュ許可）を保っている`, async ({ page }) => {
-      // ページを開いて観測する
-      const { policy, inlineScriptCount } = await observePage(page, path);
-
-      // CSP そのものが消えていないこと。
-      // 「違反ゼロ」だけを見ていると、meta を消せば違反も消えて緑になる
-      expect(policy, `${path} に Content-Security-Policy の meta が無い`).not.toBeNull();
+      // --- 2. 方式（ハッシュ許可）が保たれていること ---
+      // 「違反ゼロ」だけを見ていると、meta を消せば違反も消えて緑になる。
+      // content="" も同じで、空のポリシーは何も制限しないのに null ではないため
+      // 「CSP がある」と読めてしまう。中身があることまで確かめる
+      expect
+        .soft(
+          (policy ?? "").trim(),
+          `${path} に中身のある Content-Security-Policy の meta が無い（head の中を見ています）`,
+        )
+        .not.toBe("");
 
       // script 系ディレクティブだけを取り出す (style-src は 'unsafe-inline' を正当に使うため)。
       // ここは素朴な文字列処理でよい。取りこぼしても**誤って赤くなるだけ**で、
@@ -200,25 +230,40 @@ test.describe("Content-Security-Policy", () => {
         .filter((d) => /^(script-src|script-src-elem|default-src)\b/i.test(d))
         .join(" ");
 
+      // script を支配するディレクティブが 1 つも無ければ、ポリシーは script を制限していない
+      expect
+        .soft(
+          scriptDirectives,
+          `${path} の CSP に script を支配するディレクティブ` +
+            "（script-src / script-src-elem / default-src）が無い",
+        )
+        .not.toBe("");
+
       // インライン script を丸ごと許す指定が入っていないこと。
       // これが入ると sha256 は無意味になり、ハッシュ不一致のテストも一緒に緑になる
-      expect(
-        scriptDirectives.toLowerCase(),
-        `${path} の script 系ディレクティブに 'unsafe-inline' がある: ${scriptDirectives}`,
-      ).not.toContain("'unsafe-inline'");
+      expect
+        .soft(
+          scriptDirectives.toLowerCase(),
+          `${path} の script 系ディレクティブに 'unsafe-inline' がある: ${scriptDirectives}`,
+        )
+        .not.toContain("'unsafe-inline'");
       // eval も同様に塞いだままであること
-      expect(
-        scriptDirectives.toLowerCase(),
-        `${path} の script 系ディレクティブに 'unsafe-eval' がある: ${scriptDirectives}`,
-      ).not.toContain("'unsafe-eval'");
+      expect
+        .soft(
+          scriptDirectives.toLowerCase(),
+          `${path} の script 系ディレクティブに 'unsafe-eval' がある: ${scriptDirectives}`,
+        )
+        .not.toContain("'unsafe-eval'");
 
       // インライン script を持つページは、ハッシュで許可していること
       if (inlineScriptCount > 0) {
-        expect(
-          scriptDirectives.toLowerCase(),
-          `${path} はインライン script を ${inlineScriptCount} 個持つのに ` +
-            `script 系ディレクティブに sha256 が無い: ${scriptDirectives}`,
-        ).toContain("sha256-");
+        expect
+          .soft(
+            scriptDirectives.toLowerCase(),
+            `${path} はインライン script を ${inlineScriptCount} 個持つのに ` +
+              `script 系ディレクティブに sha256 が無い: ${scriptDirectives}`,
+          )
+          .toContain("sha256-");
       }
     });
   }

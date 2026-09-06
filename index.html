@@ -24,7 +24,7 @@
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'sha256-81EwpqnZ9qX6AMqEnC6dZlcXoa82BwGUEY9jnCCEdpE='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'"
+      content="default-src 'self'; script-src 'self' 'sha256-bApRAmFXTc0+zPAdiIXHMAJiDFuC0rh1JOW2qebHxRk='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'"
     />
     <meta name="referrer" content="strict-origin-when-cross-origin" />
 
@@ -2265,8 +2265,6 @@
                 });
                 // 対応データが見つからなかったカードのキーを溜める配列（走査後にまとめて 1 回だけ知らせる）
                 const missingKeys = [];
-                // 描画そのものが失敗したカードのキーを溜める配列
-                const failedKeys = [];
                 // data-repo-key を持つ各カードへ描画する
                 document.querySelectorAll(".work-card[data-repo-key]").forEach(function (card) {
                   const key = card.getAttribute("data-repo-key"); // 対応キーを取得
@@ -2283,8 +2281,8 @@
                     // 容器を空へ戻して、そのカードだけ確実に素の見た目へ縮退させる
                     const proof = card.querySelector("[data-proof]");
                     if (proof) proof.textContent = "";
-                    // どのカードが落ちたかを記録する
-                    failedKeys.push(key);
+                    // どのカードが落ちたかは、この 1 行がキー付きで残す
+                    // （同じ内容をまとめ直した警告は、直後に同じ情報を繰り返すだけだった）
                     console.error("[portfolio] カードのバッジ描画に失敗しました:", key, cardErr);
                   }
                 });
@@ -2303,13 +2301,6 @@
                     "[portfolio] data/portfolio.json に重複した key があります" +
                       "（後に現れた方で上書きされるため、カードに別の repo の情報が出ます）:",
                     duplicateKeys.join(", "),
-                  );
-                }
-                // 描画に失敗したカードがあれば、まとめてもう 1 行残す（個別の原因は上に出ている）
-                if (failedKeys.length > 0) {
-                  console.warn(
-                    "[portfolio] バッジを描画できなかったカード:",
-                    failedKeys.join(", "),
                   );
                 }
                 // 対応データの無いカードがあれば、その事実を開発者向けに 1 行だけ残す（§6 握り潰さない）。

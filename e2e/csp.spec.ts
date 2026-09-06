@@ -32,6 +32,7 @@
 // HTML の解析はブラウザ任せのまま。文法の細部を取りこぼしても
 // **誤って赤くなるだけ**（＝すぐ気づく）で、緑のまま見逃す側には倒れない。
 // 自前パーサが危険だったのは、取りこぼしが**誤った緑**になったからである。
+import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { test, expect, type Page } from "@playwright/test";
@@ -41,26 +42,23 @@ import { test, expect, type Page } from "@playwright/test";
 const REPO_ROOT = join(__dirname, "..");
 
 /**
- * gitignore 書式のファイルを読み、指定を**正規化した名前**の配列にする。
+ * 走査しない名前を **.htmlvalidateignore を唯一の源として**読む。
  *
- * .htmlvalidateignore と .gitignore の両方をこの 1 か所で解釈する。
- * 別々に書くと、片方だけ直したときに 2 つの一覧がずれ（下のガードはまさにその
- * ずれを見張っているのに）検査そのものが当てにならなくなる（§6 DRY）。
+ * CI の html-validate (`**\/*.html`) と同じ範囲を見るためで、ここに写しを持つと
+ * 「構文検査はされるのに CSP は検査されない」ページが黙って生まれる。
  *
- * ここで落とすのは**末尾の `/`**（ディレクトリ指定）だけ。**先頭の `/`（ルート固定）は
+ * 落とすのは**末尾の `/`**（ディレクトリ指定）だけ。**先頭の `/`（ルート固定）は
  * わざと残す** —— findPages は素の名前しか照合できずルート固定を再現できないので、
- * .htmlvalidateignore 側に `/build/` と書かれたら
- * 「html-validate はルート直下だけを外すのに、こちらは深い階層の build も飛ばす」
- * というずれになる。残しておけば UNSUPPORTED_IGNORE_ENTRIES が `/` を見て落とす。
- * .gitignore 側は「何を要求するか」を決めるだけなので、そちらで先頭の `/` を落とす。
+ * `/build/` と書かれたら「html-validate はルート直下だけを外すのに、こちらは
+ * 深い階層の build も飛ばす」というずれになる。残しておけば
+ * UNSUPPORTED_IGNORE_ENTRIES が `/` を見て落とす（fail-closed）。
  *
- * @param name リポジトリルートからのファイル名
  * @returns コメント・空行を除き、末尾の / を落とした指定の配列
  */
-function parseIgnoreFile(name: string): string[] {
+function readHtmlValidateIgnore(): string[] {
   // ファイルを UTF-8 で読み、行に分ける
   return (
-    readFileSync(join(REPO_ROOT, name), "utf8")
+    readFileSync(join(REPO_ROOT, ".htmlvalidateignore"), "utf8")
       .split("\n")
       // 前後の空白を落とす
       .map((line) => line.trim())
@@ -71,10 +69,8 @@ function parseIgnoreFile(name: string): string[] {
   );
 }
 
-// 走査しない名前は .htmlvalidateignore を唯一の源として読む。
-// CI の html-validate (`**/*.html`) と同じ範囲を見るためで、ここに写しを持つと
-// 「構文検査はされるのに CSP は検査されない」ページが黙って生まれる
-const IGNORED_NAMES = parseIgnoreFile(".htmlvalidateignore");
+// 走査しない名前（上の関数が唯一の解釈箇所）
+const IGNORED_NAMES = readHtmlValidateIgnore();
 
 // この導出が扱えるのは「単一のディレクトリ名」だけ。html-validate は gitignore の
 // 書式をひととおり解釈するので、`docs/legacy/` や `**/generated/` のような書き方を
@@ -87,48 +83,18 @@ const IGNORED_NAMES = parseIgnoreFile(".htmlvalidateignore");
 // 「構文検査はされるのに CSP は検査されない」状態を作れてしまう
 const UNSUPPORTED_IGNORE_ENTRIES = IGNORED_NAMES.filter((e) => /[/*?[\]!]/.test(e));
 
-// .gitignore に書かれた「HTML を含みうる無視対象」の一覧。
-// html-validate は .gitignore を読まないので生成物の一覧は 2 か所に要る ——
-// このファイルが対象ページの一覧を持たない理由（写しは必ず片方が古くなる）と同じ問題が、
-// ここだけは統合できずに残る。**せめて片方への足し忘れは機械的に落とす**（下のガード）。
+// **gitignore の書式は自前で解釈しない。** 否定 (`!`)・グロブ (`**/dist/`)・
+// 入れ子 (`docs/generated/`)・ルート固定 (`/build/`)・末尾スラッシュの有無・
+// 名前に含まれるドット (`build.v2`) …と場合分けが尽きず、実際この検査は
+// 自前で分類していた版で 5 つの穴（素通り 3・行き止まり 2）を出した。
+// これは CSP の文法を正規表現で再実装しようとしたのと**同じ altitude の誤り**なので、
+// 同じ手当てをする ——**判定は git 自身に任せる**。
 //
-// **末尾の `/` の有無で選り分けてはいけない。** gitignore ではディレクトリを
-// `dist`（スラッシュ無し）とも書け、そちらの方がむしろ一般的。スラッシュ付きだけを
-// 見ると、いちばん普通の書き方をした人だけがこのガードをすり抜ける
-// （実測で `dist` は素通りした）。そこで**書き方ではなく「名前の形」で判定する**。
-//
-// 除くのは 3 種類で、いずれも「足せと言っても意味が無い」もの:
-//   - 隠し名 (.lighthouseci / .env / .claude 等) — findPages も html-validate の
-//     `**\/*.html` も dotfile を最初から見ないので、書く必要が無い
-//   - グロブを含む指定 (*.log 等) — .htmlvalidateignore 側の素の名前と対応しない
-//     （そもそも UNSUPPORTED_IGNORE_ENTRIES がそういう書き方を弾いている）
-//   - 拡張子を持つ名前 (untracked-snapshot-files.txt) — ファイルであってディレクトリ
-//     ではないので、中に HTML を抱えることがない
-//
-// **先頭の `/`（ルート固定）はここで落とす。** `/build/` と書いた人へ `/build` を
-// .htmlvalidateignore へ足せと要求すると、`/` を含むので UNSUPPORTED_IGNORE_ENTRIES が
-// 落ちる ——**どちらのガードも同時には満たせない行き止まり**になる（実測で確認した）。
-// 要求するのは素の名前 `build` にする（そちらは findPages が扱える書き方）
-const GITIGNORE_DIR_ENTRIES = parseIgnoreFile(".gitignore")
-  // ルート固定の先頭 / を落として、要求する側の名前をそろえる
-  .map((e) => e.replace(/^\//, ""))
-  // 「足せと言っても意味が無い」3 種類を除く（上のコメント参照）
-  .filter((e) => !e.startsWith(".") && !/[*?[\]!]/.test(e) && !/\.[^./]+$/.test(e));
-
-// そのうち **入れ子のパス**（`docs/generated` 等）。findPages は素の名前しか照合できず
-// 再現できないので、**突き合わせの対象から外して別の指示を出す**。
-// 外さずに要求すると `/build/` と同じ行き止まりになる: `docs/generated` を
-// .htmlvalidateignore へ足せと言われ、足すと `/` を含むので UNSUPPORTED_IGNORE_ENTRIES が
-// 落ちる（実測で両方赤になることを確認した）。黙って無視もしない ——
-// その配下の HTML は findPages が実際に開きに行くので、
-// 「CSP が無い」という分かりにくい失敗になる前に、対処法を添えてここで落とす
-const NESTED_GITIGNORE_DIRS = GITIGNORE_DIR_ENTRIES.filter((e) => e.includes("/"));
-
-// 突き合わせるのは findPages が扱える「素の名前」だけ
-const GITIGNORED_DIRS = GITIGNORE_DIR_ENTRIES.filter((e) => !e.includes("/"));
-
-// .gitignore にあるのに .htmlvalidateignore に無いディレクトリ（＝足し忘れ）
-const UNIGNORED_BUILD_DIRS = GITIGNORED_DIRS.filter((d) => !IGNORED_NAMES.includes(d));
+// 見るのは「findPages が拾ったページを git が無視しているか」だけ。
+// git が無視しているなら、それは配信されない生成物なのに html-validate と
+// この検査だけが見に行っている状態で、**生成物のある手元では赤・生成物が存在しない
+// 新規チェックアウトの CI では緑**という、いちばん原因を追いにくい食い違いになる。
+// 対処は 1 つ（.htmlvalidateignore へも足す）なので、行き止まりも起こらない。
 
 /**
  * 検査対象のページを **リポジトリの *.html から再帰で導出する**。
@@ -191,6 +157,39 @@ const SETTLE_TIMEOUT_MS = 3000;
 
 // 検査対象のページ一覧
 const PAGES: ReadonlyArray<string> = findPages(REPO_ROOT);
+
+/**
+ * 渡したページのうち **git が無視しているもの**を返す。
+ *
+ * gitignore の解釈は git 自身に任せる（上のコメント参照）。`git check-ignore --stdin` は
+ * 無視されるパスだけを出力し、1 件も無ければ終了コード 1 で終わる。
+ *
+ * @param paths baseURL 起点のページパス（先頭 "/" 付き）
+ * @returns git が無視しているページのパス（同じ書式）
+ */
+function gitIgnoredPages(paths: ReadonlyArray<string>): string[] {
+  // 対象が無ければ git を呼ぶ必要も無い
+  if (paths.length === 0) return [];
+  try {
+    // リポジトリ相対のパスに直して git へ流し込む
+    const out = execFileSync("git", ["check-ignore", "--stdin"], {
+      cwd: REPO_ROOT,
+      input: paths.map((p) => p.replace(/^\//, "")).join("\n"),
+      encoding: "utf8",
+    });
+    // 出力（無視されたパス）を元の書式へ戻して返す
+    return out.split("\n").filter(Boolean).map((p) => `/${p}`);
+  } catch (err) {
+    // 終了コード 1 は「1 件も無視されていない」＝正常
+    if ((err as { status?: number }).status === 1) return [];
+    // それ以外（git が無い・リポジトリでない等）は前提が崩れているので落とす。
+    // 握り潰すと「無視ゼロ＝緑」になり、この検査が黙って無効になる（fail-closed）
+    throw err;
+  }
+}
+
+// findPages が拾ったのに git が無視しているページ（＝ .htmlvalidateignore への足し忘れ）
+const GIT_IGNORED_PAGES = gitIgnoredPages(PAGES);
 
 // 違反 1 件分の記録 (どのディレクティブが何をブロックしたかを失敗メッセージに出すため)
 interface CspViolation {
@@ -351,24 +350,16 @@ test.describe("Content-Security-Policy", () => {
       ".htmlvalidateignore に、e2e/csp.spec.ts の導出が扱えない書き方があります" +
         "（対応しているのは単一のディレクトリ名だけ）。findPages を拡張するか、書き方を単純にしてください",
     ).toEqual([]);
-    // .gitignore の生成物ディレクトリが .htmlvalidateignore にも載っていること。
-    // 片方だけに足すと、生成物が存在しない CI（新規チェックアウト）は緑のまま、
-    // 生成物のある手元でだけ「第三者の HTML に CSP が無い」と赤くなる ——
+    // git が無視しているページを拾っていないこと（判定は git 自身に任せる。上のコメント参照）。
+    // 拾ってしまうと、生成物のある手元では「第三者の HTML に CSP が無い」と赤くなり、
+    // 生成物が存在しない新規チェックアウトの CI は緑のまま ——
     // CI と手元が食い違う、いちばん原因を追いにくい形になる
     expect(
-      UNIGNORED_BUILD_DIRS,
-      ".gitignore にあるディレクトリが .htmlvalidateignore に載っていません。" +
-        "html-validate は .gitignore を読まないので、生成物ディレクトリは両方に書いてください",
-    ).toEqual([]);
-    // 入れ子のパスは findPages が再現できないので、突き合わせではなく専用の指示で落とす。
-    // 上の突き合わせに混ぜると「足せと言われた形が扱えない書き方だった」という
-    // 行き止まりになるため、対処法の違う 2 つを別々のメッセージにしてある
-    expect(
-      NESTED_GITIGNORE_DIRS,
-      ".gitignore に入れ子のパス指定があります。e2e/csp.spec.ts の findPages は" +
-        "素のディレクトリ名しか照合できないため、この配下の HTML を開きに行って" +
-        "「CSP が無い」と誤って赤くなります。素のディレクトリ名で書く" +
-        "（そのうえで .htmlvalidateignore にも足す）か、findPages を拡張してください",
+      GIT_IGNORED_PAGES,
+      "git が無視しているページを CSP の検査対象に拾っています。" +
+        "html-validate は .gitignore を読まないので、生成物は .htmlvalidateignore にも" +
+        "書いてください（そうしないと、このテストも `npx html-validate \"**/*.html\"` も" +
+        "手元でだけ赤くなります）",
     ).toEqual([]);
   });
 

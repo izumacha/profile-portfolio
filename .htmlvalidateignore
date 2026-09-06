@@ -11,11 +11,13 @@
 # 「変換器を使わない」の指定で検査対象からは外さない（消して実測すると node_modules 配下の
 # HTML が検査され exit 1 になる）。紛らわしいので同じコミットで削除した。
 #
-# この 1 行を消すと node_modules 配下の HTML 17 枚が検査対象に入る。**ただし CI の
-# html-validate ジョブは npm ci を走らせず `npx --yes` で実行するので node_modules が
-# 存在せず、そこでは気づけない**（気づけるのは npm ci を走らせる visual-regression
-# ジョブで e2e が同じ 17 枚を開きに行って落ちるときで、表示は
-# 「ビジュアルリグレッションが失敗」になり原因にたどり着きにくい）。手元では即座に落ちる。
+# この 1 行を消すと node_modules 配下の HTML 17 枚が検査対象に入る。CI の html-validate
+# ジョブは npm ci を走らせてから `npx html-validate "**/*.html"` を実行する（同じコミットで
+# `npx --yes` から変えた。理由は ci.yml のコメント）ので、node_modules は存在する。
+# **したがって足し忘れはその場で exit 1 になり、手元と同じ場所・同じ理由で落ちる。**
+# 以前の `npx --yes` 実行では node_modules が無く、気づけるのは npm ci を走らせる
+# visual-regression ジョブが同じ 17 枚を開きに行って落ちるときだけで、表示は
+# 「ビジュアルリグレッションが失敗」になり原因にたどり着けなかった。
 #
 # **下の生成物ディレクトリは .gitignore にも書いてある（html-validate は .gitignore を
 # 読まないため）。生成物ディレクトリを足すときは両方に書くこと。** 片方だけだと、

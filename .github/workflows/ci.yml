@@ -30,9 +30,17 @@ jobs:
       # supply-chain integrity (issue #16); the version is noted in the comment.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # **Node の major は、ピン留めした検査ツールが宣言する対応範囲に合わせる。**
+      # html-validate 11.x の engines は `^22.22.0 || >= 24.8.0` で、CLI のグロブ展開に
+      # Node 22 で入った fs.globSync を使う。20 のままだと `npx html-validate "**/*.html"` が
+      # `TypeError: fs.globSync is not a function` で落ちる（実際にこの PR で落ちた）。
+      # **npm ci は engines 違反を警告するだけで止めない**ので、インストールは成功し、
+      # 実行時になって初めて壊れる。ローカルが 22 以上だと手元では再現せず CI だけが赤くなる。
+      # このリポジトリの他ジョブも同じ package-lock.json を入れるため、major は 4 か所
+      # （このファイルの 2 か所・lighthouse.yml・update-snapshots.yml）で必ずそろえる。
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 20
+          node-version: 22
 
       # html-validate は package.json / package-lock.json でピン留めしたものを使う（§9）。
       # `npx --yes` だと毎回 latest を取りに行き、**この repo に何のコミットも無いまま
@@ -132,9 +140,12 @@ jobs:
           # 最初に見つかった 1 つで打ち切るため、複数欠けていれば 1 回に 1 つずつ出る
           : "${SNAPSHOT_DIR:?}" "${RECHECK_OUTPUT_DIR:?}" "${UNTRACKED_LIST_FILE:?}"
 
+      # major は html-validate ジョブと同じ 22 にそろえる（理由は同ジョブのコメント）。
+      # 同じ package-lock.json を入れるので、ここだけ古い major に残すと
+      # 「同じ依存を 2 つの major で動かす」ことになり、engines 違反が警告のまま埋もれる
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Install
         run: npm ci

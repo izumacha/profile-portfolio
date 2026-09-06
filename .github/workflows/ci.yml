@@ -34,12 +34,22 @@ jobs:
         with:
           node-version: 20
 
+      # html-validate は package.json / package-lock.json でピン留めしたものを使う（§9）。
+      # `npx --yes` だと毎回 latest を取りに行き、**この repo に何のコミットも無いまま
+      # 検査の中身が変わる**。しかもこのツールは (a) どの HTML を構文検査するか だけでなく、
+      # (b) .htmlvalidateignore を通じて **どのページが CSP 検査を受けるか**（e2e/csp.spec.ts が
+      # 同じファイルを唯一の源として読む）まで決めており、major 更新でグロブや
+      # ignore の解決が変わると、この PR が塞いだはずの「構文検査はされるのに
+      # CSP は検査されない」ずれが黙って戻る
+      - name: Install dependencies
+        run: npm ci
+
       # 対象を "index.html" "resume.html" と書き並べない。写しを持つと、ページを足した人が
       # 追加を忘れた瞬間にそのページだけ黙って構文検査から外れる。
       # html-validate はグロブを自前で解釈するので、シェルに展開させず引用して渡す。
       # 配信されない HTML（node_modules 等）は .htmlvalidateignore で外す
       - name: Validate HTML
-        run: npx --yes html-validate "**/*.html"
+        run: npx html-validate "**/*.html"
 
   link-check:
     runs-on: ubuntu-latest

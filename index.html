@@ -24,7 +24,7 @@
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'sha256-EuxSgiVoZB5MAcq3FIEaFKKD0cvx39Gl/80Qk94lxqE='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'"
+      content="default-src 'self'; script-src 'self' 'sha256-CAQcfNO87doQ1n1nDsPk1atQ8LiVje7cw0qM0n4QeYo='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'"
     />
     <meta name="referrer" content="strict-origin-when-cross-origin" />
 
@@ -2235,9 +2235,13 @@
                 // 「内容を反映できませんでした」1 行を出して終わる ——このコミットで足した
                 // missingKeys / duplicateKeys / カード単位の縮退がどれも動かないまま、
                 // いちばん起こりやすい壊れ方だけが opaque なログに戻ってしまう
-                const repos = Array.isArray(data && data.repos) ? data.repos : [];
+                // 「配列かどうか」は 1 回だけ判定して使い回す。同じ条件を 2 か所に書くと、
+                // 片方だけ直したときに「空配列で描画するのにエラーは出ない」
+                // （＝また opaque な壊れ方）へ静かに戻る
+                const reposIsArray = Array.isArray(data && data.repos);
+                const repos = reposIsArray ? data.repos : [];
                 // repos があるのに配列でない場合は、その事実を知らせる（黙って空扱いにしない。§6）
-                if (data && data.repos && !Array.isArray(data.repos)) {
+                if (!reposIsArray && data && data.repos) {
                   console.error(
                     "[portfolio] data/portfolio.json の repos が配列ではありません。" +
                       "バッジは描画されません:",

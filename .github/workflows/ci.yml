@@ -37,6 +37,14 @@ jobs:
       - name: Validate HTML
         run: npx --yes html-validate "index.html" "resume.html"
 
+      # CSP の sha256 とインライン script の一致を検査する。
+      # 不一致のまま公開するとブラウザが script の実行を拒否し、ページの JavaScript が
+      # 丸ごと動かなくなるが、HTML の構文としては正しいので上の html-validate は緑のまま通る
+      # （検査の詳細と、なぜ e2e だけでは足りないかは scripts/check-csp-hash.mjs の冒頭を参照）。
+      # ブラウザを起動しないので html-validate と同じジョブに置き、数秒で落とせるようにする
+      - name: Check CSP hash
+        run: npm run check:csp
+
   link-check:
     runs-on: ubuntu-latest
     # リンクチェックはリポジトリの読み取りのみ必要

@@ -26,6 +26,7 @@ python -m http.server 8000         # ローカルサーバーで配信して確�
 ```bash
 npm ci                                          # 依存インストール（決定的）
 npx --yes html-validate index.html resume.html  # HTML 構文チェック
+npm run check:csp                                # CSP の sha256 とインライン script の一致検査
 npx playwright install --with-deps chromium      # 初回のみ: E2E 用ブラウザ
 npm run test:e2e                                 # Playwright ビジュアルリグレッション
 npm run test:lighthouse                          # Lighthouse CI（lhci autorun）
@@ -55,6 +56,7 @@ GIF 化に `ffmpeg` を使うため事前にインストールしておく。ブ
 | `data/portfolio.json` | 各プロジェクトの CI 結果・最終コミット・言語の焼き込みデータ。`index.html` の「Live self-proof」バッジがこれを fetch する（**自動生成物**。`.github/workflows/update-portfolio-data.yml` が更新する） |
 | `e2e/sections.spec.ts` | セクション表示・ナビゲーションの E2E（§2 の `npm run test:e2e`） |
 | `e2e/visual.spec.ts` | ビジュアルリグレッション（スナップショット比較） |
+| `scripts/check-csp-hash.mjs` | CSP の sha256 とインライン script の一致を検査するスクリプト（下記） |
 | `scripts/capture-screenshots.mjs` | README 掲載用スクショ・デモ GIF の自動撮影スクリプト（§15） |
 | `scripts/lib/scroll-priming.mjs` | スクロール連動アニメーションを事前発火させる共有ヘルパー（撮影と E2E で共用） |
 | `scripts/lib/static-server.mjs` | 撮影時に `data/portfolio.json` を fetch できるようにするローカル静的サーバー |
@@ -66,6 +68,24 @@ GIF 化に `ffmpeg` を使うため事前にインストールしておく。ブ
 - レスポンシブ: ブレークポイント 968px（タブレット）・768px（モバイル）。グリッドは `auto-fit, minmax()` でメディアクエリを最小化。フォントは `clamp()` で流体タイポグラフィを適用。
 - コンポーネント: カードは `border-radius: 16px〜24px`＋ホバーで `translateY(-5px)`＋グロー、ボタンはホバーで `translateY(-3px)`＋シャドウ強調、アニメーションは Intersection Observer でスクロール連動。ボタン/バッジのように白文字を上に重ねる背景は `--gradient-1` ではなく、WCAG AA 4.5:1 を全 stop で確保した `--gradient-1-solid-text` を使う（`--gradient-1` は見出しの `background-clip: text` などグラデーション文字色や、装飾的なアクセント線・ボーダー用）。
 - HTML はセマンティックタグ（`<section>` / `<header>` / `<nav>` / `<footer>`）、CSS は BEM 風命名（`.section-header`, `.skill-card`, `.timeline-item`）、JS は Vanilla のみ（Google Fonts 以外の外部ライブラリを追加しない）。
+
+### インライン script を編集したら CSP の sha256 を更新する（必須）
+
+GitHub Pages は HTTP レスポンスヘッダを付けられないため、CSP は `index.html` の `<meta http-equiv="Content-Security-Policy">` で配信している。`script-src` は `'unsafe-inline'` を使わず、**body 末尾のインライン script 本文の `base64(SHA-256(...))` を 1 つだけ**許可する形になっている（`resume.html` は script を持たないので `script-src 'none'`）。
+
+**したがってインライン script を 1 文字でも編集するとハッシュが合わなくなり、ブラウザがその script の実行を拒否する。** 壊れ方が見つけにくい:
+
+- HTML の構文としては正しいので `html-validate` は**緑のまま通る**。
+- サーバーもエラーを返さない（拒否するのはブラウザで、DevTools のコンソールにしか出ない）。
+- 画面は「JS が一切動かないただの静的ページ」になるだけで、レイアウトは崩れない。
+
+そのため `npm run check:csp`（`scripts/check-csp-hash.mjs`）が一致を機械的に検査し、CI の `html-validate` ジョブでも走る。見張るのは 3 つで、いずれも fail-closed（前提が崩れたら「違反ゼロ＝緑」にせず落とす）:
+
+1. `index.html` の実行対象インライン script がちょうど 1 つであること（増やすなら CSP へその分の sha256 を足し、この検査も複数対応へ広げる）。
+2. その本文のハッシュが `script-src` の sha256 トークンと一致すること。**不一致のときは「実際に必要な値」を出すので、それを CSP へ貼り替えれば直る。**
+3. `resume.html` が `script-src 'none'` を宣言し、実際にインライン script を持たないこと（片方だけ変わると同じ実行拒否になる）。
+
+e2e（`npm run test:e2e`）も間接的には検知するが、それは「バッジの描画を確かめるテストがたまたま script の実行に依存している」からで、**script に依存するテストが 1 本も無い領域を編集した場合は素通りする**。ハッシュの一致自体はブラウザ無しで確かめられるので専用の検査に切り出してある。
 
 ### セクション追加時のチェックリスト
 

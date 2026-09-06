@@ -24,7 +24,7 @@
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'sha256-PexV5wqT4I2aHph2uzP5Dzjf8y9A+rlkHoi7GUrJ548='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'"
+      content="default-src 'self'; script-src 'self' 'sha256-IgSlVLg+beUan9BR6iLQTDG3Bre2cfko7BP1tqxcJ7w='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'"
     />
     <meta name="referrer" content="strict-origin-when-cross-origin" />
 
@@ -2102,7 +2102,11 @@
       // ---- Live self-proof: 焼き込み JSON でプロジェクトカードに本物の CI/コミット/言語を描画 ----
       (function () {
         // CI 結論コードを「色クラス・日本語ラベル」に対応づける表（portfolio.json の status 値と一致させる）
-        const CI_LABELS = {
+        // Object.create(null) を土台にするのは byKey と同じ理由。素の {} だと
+        // ci.status が "constructor" / "toString" のとき Object.prototype 由来の値が
+        // 引けてしまい、`CI_LABELS[ci.status] || CI_LABELS.none` が truthy を返して
+        // フォールバックが働かず、バッジに文字列 "undefined" が出る
+        const CI_LABELS = Object.assign(Object.create(null), {
           success: { cls: "is-success", label: "CI 成功" }, // ワークフローが正常終了した場合
           failure: { cls: "is-failure", label: "CI 失敗" }, // ワークフローが失敗した場合
           cancelled: { cls: "is-failure", label: "CI 中止" }, // ワークフローがキャンセルされた場合
@@ -2110,7 +2114,7 @@
           in_progress: { cls: "is-running", label: "CI 実行中" }, // まだ実行中の場合
           skipped: { cls: "", label: "CI スキップ" }, // ジョブがスキップされた場合
           none: { cls: "", label: "CI 情報なし" }, // CI 情報がない・未走行の場合
-        };
+        });
 
         // ISO 日時を「YYYY/MM/DD」形式に整形する（空文字や不正値は null を返す）
         function formatDate(iso) {
@@ -2221,21 +2225,147 @@
               return res.json(); // JSON をパース
             })
             .then(function (data) {
-              const repos = (data && data.repos) || []; // repo 配列（無ければ空）
-              const generatedAt = data && data.generated_at; // 生成日時
-              // key → repo の対応表を作る
-              const byKey = {};
-              repos.forEach(function (r) {
-                byKey[r.key] = r; // キーと repo データを対応表に登録する
-              });
-              // data-repo-key を持つ各カードへ描画する
-              document.querySelectorAll(".work-card[data-repo-key]").forEach(function (card) {
-                const key = card.getAttribute("data-repo-key"); // 対応キーを取得
-                renderCard(card, byKey[key], generatedAt); // 該当データで描画
-              });
+              // 描画は独立した try で包む。取得と同じ catch にまとめると、JSON は正しく
+              // 読めたのに中身の形が想定外（repos が配列でない・要素が null 等）で落ちた場合まで
+              // 「読み込めませんでした」と報告してしまい、実際は届いているファイルの配信パスを
+              // 調べに行かせることになる。原因ごとに違う文言を出す
+              try {
+                // repos は配列であることを**先に確かめる**。`|| []` だけだと
+                // {"repos": {}} のような形で forEach が TypeError になり、外側の catch が
+                // 「内容を反映できませんでした」1 行を出して終わる ——このコミットで足した
+                // missingKeys / duplicateKeys / カード単位の縮退がどれも動かないまま、
+                // いちばん起こりやすい壊れ方だけが opaque なログに戻ってしまう
+                // 「配列かどうか」は 1 回だけ判定して使い回す。同じ条件を 2 か所に書くと、
+                // 片方だけ直したときに「空配列で描画するのにエラーは出ない」
+                // （＝また opaque な壊れ方）へ静かに戻る
+                const reposIsArray = Array.isArray(data && data.repos);
+                const repos = reposIsArray ? data.repos : [];
+                // 配列でなかったときは、その事実を知らせる（黙って空扱いにしない。§6）。
+                // **「repos が無い」と「repos はあるが配列でない」を書き分ける**。
+                // 一緒くたにすると、生成側が repos ごと落とした場合に下の missingKeys だけが
+                // 出て「data-repo-key の綴り違い」を疑わせてしまい、正しいカードのマークアップを
+                // 調べに行かせることになる（本当の原因は update-portfolio-data.yml の側）
+                if (!reposIsArray) {
+                  console.error(
+                    data && data.repos !== undefined
+                      ? "[portfolio] data/portfolio.json の repos が配列ではありません。" +
+                          "バッジは描画されません（型: " +
+                          typeof data.repos +
+                          "）"
+                      : "[portfolio] data/portfolio.json に repos がありません。" +
+                          "バッジは描画されません（生成側 .github/workflows/update-portfolio-data.yml を確認してください）",
+                  );
+                }
+                const generatedAt = data && data.generated_at; // 生成日時
+                // key → repo の対応表を作る。
+                // Object.create(null) で「継承した中身を持たない」入れ物にするのが要点。
+                // 素の {} だと constructor / toString のような Object.prototype 由来の名前が
+                // 最初から引けてしまい、その名前の data-repo-key を持つカードが
+                // 「データあり」と誤判定されて中身のないバッジが描かれる。
+                // 書き込み側も __proto__ という key で対応表そのものを壊せなくなる
+                const byKey = Object.create(null);
+                // key を持たず読み飛ばした要素の件数
+                let skippedRepos = 0;
+                // 同じ key が 2 回以上現れた（後勝ちで上書きされた）key の一覧
+                const duplicateKeys = [];
+                repos.forEach(function (r) {
+                  // 壊れた要素（null や key を持たないもの）が 1 件混ざっただけで
+                  // ここが throw すると、以降の正常な repo が 1 つも登録されない。
+                  // 使える要素だけ拾い、残りは件数だけ数える
+                  if (!r || typeof r.key !== "string") {
+                    skippedRepos += 1; // 使えない要素として数える
+                    return; // この要素は登録しない
+                  }
+                  // 既に同じ key が登録済みなら、これから上書きすることを控えておく。
+                  // 件数の引き算（repos.length - キー数）で代用すると、重複を
+                  // 「key を持たない要素」として誤って報告し、しかも
+                  // **本当の問題（先勝ちの行が黙って別の repo のデータに置き換わる）**を
+                  // 一切知らせないままになる
+                  // 同じ key が 3 回以上現れても報告は 1 回にする
+                  // （毎回積むと "a, a" のように同じ名前が並び、別々の重複に見える）
+                  if (byKey[r.key] !== undefined && duplicateKeys.indexOf(r.key) === -1) {
+                    duplicateKeys.push(r.key);
+                  }
+                  byKey[r.key] = r; // キーと repo データを対応表に登録する
+                });
+                // 対応データが見つからなかったカードのキーを溜める配列（走査後にまとめて 1 回だけ知らせる）
+                const missingKeys = [];
+                // data-repo-key を持つ各カードへ描画する
+                document.querySelectorAll(".work-card[data-repo-key]").forEach(function (card) {
+                  const key = card.getAttribute("data-repo-key"); // 対応キーを取得
+                  // JSON 側に同じキーの repo が無いカードを記録する（描画自体は下の renderCard が
+                  // 素のカードのままにする。キーの綴り違いや収集対象からの漏れがここに現れる）。
+                  // duplicateKeys と同じ理由で**重複は入れない**: カードをコピペして
+                  // data-repo-key を直し忘れると同じキーのカードが 2 枚できるので、
+                  // そのままだと「a, a」と並んで別々の綴り違いがあるように読めてしまう
+                  if (!byKey[key] && missingKeys.indexOf(key) === -1) missingKeys.push(key);
+                  // 描画は **カード 1 枚ごと** に囲う。ループ全体を 1 つの try で囲うと、
+                  // 1 件の壊れたデータで残り全部のバッジが道連れになって消える
+                  try {
+                    renderCard(card, byKey[key], generatedAt); // 該当データで描画
+                  } catch (cardErr) {
+                    // renderCard は最初に容器を空にしてからバッジを 1 つずつ足すため、
+                    // 途中で落ちると「CI バッジだけあって日付が無い」半端な状態が残る。
+                    // 容器を空へ戻して、そのカードだけ確実に素の見た目へ縮退させる
+                    const proof = card.querySelector("[data-proof]");
+                    if (proof) proof.textContent = "";
+                    // どのカードが落ちたかは、この 1 行がキー付きで残す
+                    // （同じ内容をまとめ直した警告は、直後に同じ情報を繰り返すだけだった）
+                    console.error("[portfolio] カードのバッジ描画に失敗しました:", key, cardErr);
+                  }
+                });
+                // JSON 側に使えない要素があれば、その件数を知らせる（黙って捨てない。§6）
+                if (skippedRepos > 0) {
+                  console.warn(
+                    "[portfolio] data/portfolio.json に key を持たない要素が" +
+                      skippedRepos +
+                      " 件あり、読み飛ばしました。",
+                  );
+                }
+                // 同じ key が重複していたら知らせる。後勝ちで上書きされるため、
+                // 該当カードには「別の repo の CI・コミット情報」が表示されてしまう
+                if (duplicateKeys.length > 0) {
+                  console.warn(
+                    "[portfolio] data/portfolio.json に重複した key があります" +
+                      "（後に現れた方で上書きされるため、カードに別の repo の情報が出ます）:",
+                    duplicateKeys.join(", "),
+                  );
+                }
+                // 対応データの無いカードがあれば、その事実を開発者向けに 1 行だけ残す（§6 握り潰さない）。
+                // 画面は素のカードのままで利用者には何も出さないため、ここで記録しないと
+                // 「バッジが出ないのは意図どおりなのか壊れているのか」を後から切り分けられない
+                // **repos がそもそも読めなかったときは出さない。** その場合は全カードが
+                // 必ずここに並ぶが、原因は上で報告済みの「repos が無い／配列でない」であって
+                // カードの綴りではない。最後に読まれるのがこの行になると、正しいマークアップを
+                // 疑わせてしまい、原因を書き分けた上の分岐が半分打ち消される
+                if (reposIsArray && missingKeys.length > 0) {
+                  console.warn(
+                    "[portfolio] data/portfolio.json に対応データが無いカードがあります" +
+                      "（data-repo-key の綴り違い、または収集対象からの漏れ）:",
+                    missingKeys.join(", "),
+                  );
+                }
+              } catch (renderErr) {
+                // 読み込みは成功しているので、原因は JSON の中身の形。取得失敗と混同させない
+                console.error(
+                  "[portfolio] data/portfolio.json は読み込めましたが、内容を反映できませんでした" +
+                    "（想定した形になっていない可能性があります）:",
+                  renderErr,
+                );
+              }
             })
-            .catch(function () {
-              // 取得失敗・JSON 不正時は何もしない＝素のカード表示にフォールバック
+            .catch(function (err) {
+              // 取得失敗・JSON 不正時は素のカード表示へ縮退する（fail-safe）。ただし黙って捨てない（§6）。
+              // ここが空の catch だった頃は、data/portfolio.json の 404（配信パスのずれ）や
+              // update-portfolio-data.yml が壊れた JSON を書いた場合でも、CI/コミット/言語バッジが
+              // 手がかりゼロで消えるだけで、意図した表示と区別が付かなかった。
+              // 描画段階の失敗は上の try が受け持つので、ここへ来るのは取得と JSON 解析の失敗だけ。
+              // console.error は開発者向けの出力で、閲覧者の画面には何も出さない（§9 内部詳細を出さない）
+              console.error(
+                "[portfolio] data/portfolio.json を読み込めませんでした。" +
+                  "プロジェクトカードの CI・最終コミット・言語バッジは表示されません:",
+                err,
+              );
             });
         }
 

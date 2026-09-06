@@ -30,12 +30,42 @@ jobs:
       # supply-chain integrity (issue #16); the version is noted in the comment.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # **Node の major は、ピン留めした検査ツールが宣言する対応範囲に合わせる。**
+      # html-validate 11.x の engines は `^22.22.0 || >= 24.8.0` で、CLI のグロブ展開に
+      # Node 22 で入った fs.globSync を使う。20 のままだと `npx html-validate "**/*.html"` が
+      # `TypeError: fs.globSync is not a function` で落ちる（実際にこの PR で落ちた）。
+      # **npm ci は engines 違反を警告するだけで止めない**ので、インストールは成功し、
+      # 実行時になって初めて壊れる。ローカルが 22 以上だと手元では再現せず CI だけが赤くなる。
+      # このリポジトリの他ジョブも同じ package-lock.json を入れるため、major は 4 か所
+      # （このファイルの 2 か所・lighthouse.yml・update-snapshots.yml）で必ずそろえる。
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 20
+          node-version: 22
+          # 依存はロックファイルで固定済みなので、~/.npm を再利用して毎回の
+          # フル取得を避ける（この PR で html-validate ジョブにも npm ci が入り、
+          # lint 1 本のために dev 依存一式を毎回落としていた）
+          cache: npm
 
+      # html-validate は package.json / package-lock.json でピン留めしたものを使う（§9）。
+      # `npx --yes` だと毎回 latest を取りに行き、**この repo に何のコミットも無いまま
+      # 検査の中身が変わる**。しかもこのツールは (a) どの HTML を構文検査するか だけでなく、
+      # (b) .htmlvalidateignore を通じて **どのページが CSP 検査を受けるか**（e2e/csp.spec.ts が
+      # 同じファイルを唯一の源として読む）まで決めており、major 更新でグロブや
+      # ignore の解決が変わると、この PR が塞いだはずの「構文検査はされるのに
+      # CSP は検査されない」ずれが黙って戻る
+      - name: Install dependencies
+        run: npm ci
+
+      # 対象を "index.html" "resume.html" と書き並べない。写しを持つと、ページを足した人が
+      # 追加を忘れた瞬間にそのページだけ黙って構文検査から外れる。
+      # html-validate はグロブを自前で解釈するので、シェルに展開させず引用して渡す。
+      # 配信されない HTML（node_modules 等）は .htmlvalidateignore で外す。
+      # **拡張子は .html と .htm の両方を拾う。** e2e/csp.spec.ts の取りこぼしガードは
+      # `git ls-files -- "*.html" "*.htm"` を「あるべき集合」として使うので、ここが .html だけだと
+      # .htm のページを 1 枚置いた瞬間に「CSP 検査は赤いのに構文検査は素通り」というずれになる
+      # （しかも .htmlvalidateignore へ足しても取りこぼしガードは赤のままで、直し方が無い）
       - name: Validate HTML
-        run: npx --yes html-validate "index.html" "resume.html"
+        run: npx html-validate "**/*.{html,htm}"
 
   link-check:
     runs-on: ubuntu-latest
@@ -118,9 +148,16 @@ jobs:
           # 最初に見つかった 1 つで打ち切るため、複数欠けていれば 1 回に 1 つずつ出る
           : "${SNAPSHOT_DIR:?}" "${RECHECK_OUTPUT_DIR:?}" "${UNTRACKED_LIST_FILE:?}"
 
+      # major は html-validate ジョブと同じ 22 にそろえる（理由は同ジョブのコメント）。
+      # 同じ package-lock.json を入れるので、ここだけ古い major に残すと
+      # 「同じ依存を 2 つの major で動かす」ことになり、engines 違反が警告のまま埋もれる
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 20
+          node-version: 22
+          # 依存はロックファイルで固定済みなので、~/.npm を再利用して毎回の
+          # フル取得を避ける（この PR で html-validate ジョブにも npm ci が入り、
+          # lint 1 本のために dev 依存一式を毎回落としていた）
+          cache: npm
 
       - name: Install
         run: npm ci

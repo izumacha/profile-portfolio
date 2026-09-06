@@ -25,9 +25,9 @@ python -m http.server 8000         # ローカルサーバーで配信して確�
 
 ```bash
 npm ci                                          # 依存インストール（決定的）
-npx --yes html-validate index.html resume.html  # HTML 構文チェック
+npx html-validate "**/*.{html,htm}"               # HTML 構文チェック（除外は .htmlvalidateignore）
 npx playwright install --with-deps chromium      # 初回のみ: E2E 用ブラウザ
-npm run test:e2e                                 # Playwright ビジュアルリグレッション
+npm run test:e2e                                 # Playwright（ビジュアルリグレッション + 機能 + CSP 違反）
 npm run test:lighthouse                          # Lighthouse CI（lhci autorun）
 npx playwright test --update-snapshots           # 意図的な見た目変更時にスナップショット更新
 ```
@@ -50,7 +50,14 @@ GIF 化に `ffmpeg` を使うため事前にインストールしておく。ブ
 | `index.html` | メインポートフォリオページ（ダークテーマ） |
 | `resume.html` | 履歴書ページ（ライトテーマ、印刷対応） |
 | `avatar.jpg` | プロフィール画像 |
+| `favicon.svg` | ファビコン（両ページから参照） |
 | `*.pdf` | 資格証明書 |
+| `data/portfolio.json` | 各プロジェクトの CI 結果・最終コミット・言語の焼き込みデータ。`index.html` の「Live self-proof」バッジがこれを fetch する（**自動生成物**。`.github/workflows/update-portfolio-data.yml` が更新する） |
+| `e2e/sections.spec.ts` | セクション表示・ナビゲーションの E2E（§2 の `npm run test:e2e`） |
+| `e2e/visual.spec.ts` | ビジュアルリグレッション（スナップショット比較） |
+| `.htmlvalidateignore` | html-validate の検査対象から外すパス（配信されない HTML） |
+| `e2e/csp.spec.ts` | CSP 違反が起きないことをブラウザに判定させる E2E（下記） |
+| `.gitattributes` | 改行を LF に固定する（CSP の sha256 が CRLF チェックアウトでずれないようにするため。下記） |
 | `scripts/capture-screenshots.mjs` | README 掲載用スクショ・デモ GIF の自動撮影スクリプト（§15） |
 | `scripts/lib/scroll-priming.mjs` | スクロール連動アニメーションを事前発火させる共有ヘルパー（撮影と E2E で共用） |
 | `scripts/lib/static-server.mjs` | 撮影時に `data/portfolio.json` を fetch できるようにするローカル静的サーバー |
@@ -62,6 +69,48 @@ GIF 化に `ffmpeg` を使うため事前にインストールしておく。ブ
 - レスポンシブ: ブレークポイント 968px（タブレット）・768px（モバイル）。グリッドは `auto-fit, minmax()` でメディアクエリを最小化。フォントは `clamp()` で流体タイポグラフィを適用。
 - コンポーネント: カードは `border-radius: 16px〜24px`＋ホバーで `translateY(-5px)`＋グロー、ボタンはホバーで `translateY(-3px)`＋シャドウ強調、アニメーションは Intersection Observer でスクロール連動。ボタン/バッジのように白文字を上に重ねる背景は `--gradient-1` ではなく、WCAG AA 4.5:1 を全 stop で確保した `--gradient-1-solid-text` を使う（`--gradient-1` は見出しの `background-clip: text` などグラデーション文字色や、装飾的なアクセント線・ボーダー用）。
 - HTML はセマンティックタグ（`<section>` / `<header>` / `<nav>` / `<footer>`）、CSS は BEM 風命名（`.section-header`, `.skill-card`, `.timeline-item`）、JS は Vanilla のみ（Google Fonts 以外の外部ライブラリを追加しない）。
+
+### インライン script を編集したら CSP の sha256 を更新する（必須）
+
+GitHub Pages は HTTP レスポンスヘッダを付けられないため、CSP は `index.html` の `<meta http-equiv="Content-Security-Policy">` で配信している。`script-src` は `'unsafe-inline'` を使わず、**body 末尾のインライン script 本文の `base64(SHA-256(...))` を 1 つだけ**許可する形になっている（`resume.html` は script を持たないので `script-src 'none'`）。
+
+**したがってインライン script を 1 文字でも編集するとハッシュが合わなくなり、ブラウザがその script の実行を拒否する。** 壊れ方が見つけにくい:
+
+- HTML の構文としては正しいので `html-validate` は**緑のまま通る**。
+- サーバーもエラーを返さない（拒否するのはブラウザで、DevTools のコンソールにしか出ない）。
+- 画面は「JS が一切動かないただの静的ページ」になるだけで、レイアウトは崩れない。
+
+**新しいハッシュは DevTools のコンソールが教えてくれる。** ローカルサーバーでページを開くと `Refused to execute inline script ... a hash ('sha256-...') is required` と出るので、その値を CSP meta の `script-src` へ貼り替える。
+
+#### 検査は `e2e/csp.spec.ts` が**ブラウザに判定させる**
+
+対象ページはリポジトリの `*.html` から再帰で導出する（除外は `.htmlvalidateignore` を唯一の源として読み、CI の `html-validate` と範囲をそろえる）。1 枚も導出できなければ落とす（fail-closed）。各ページで 2 本を確かめる:
+
+1. **違反ゼロ** — `securitypolicyviolation` イベントを拾い、ブラウザが実際に何もブロックしないこと。
+2. **方式が保たれていること** — CSP が（`<head>` に）存在して中身が空でなく、script 系ディレクティブに `'unsafe-inline'` / `'unsafe-eval'` が無く、**CSP meta より前に script が置かれておらず**（meta の CSP はそれより後ろしか支配しないため、前に置かれた script は無制限に実行され違反も起きない）、インライン script を持つページには `sha256-` があること。
+
+導出の健全性を見るガード（`検査対象の導出が壊れていない`）も同じファイルにあり、**ページを 1 枚も導出できない** / `.htmlvalidateignore` に導出が解釈できない書き方（`!` 否定など）がある / **git が無視しているページを拾っている**（余計なものを拾った側）/ **git が追跡しているページを拾えていない**（取りこぼした側）の 4 つで落ちる。
+
+**取りこぼし側のガードが要る理由**: 余計なものだけを見ていると、実在のページを `.htmlvalidateignore` へ足すだけで html-validate からも CSP 検査からも外せてしまい、**痕跡はテスト件数が 1 つ減ることだけ**（正当なリファクタと見分けが付かない）。実測で `pages/talks.html` を置いて `pages/` を除外すると、両方とも緑のまま通った。照合には **`git ls-files` という導出とは独立な手がかり**を使う（GitHub Pages が実際に配信する集合そのもので、`.htmlvalidateignore` にも `findPages` の実装にも依存しない）。同じ手がかりでガードを書くと、導出が狭まったときにガードも一緒に狭まって無力化される。
+
+3 つ目は、html-validate が `.gitignore` を読まないため生成物の除外指定が 2 か所に必要になることへの手当て（**生成物ディレクトリを足すときは `.gitignore` と `.htmlvalidateignore` の両方に書く**。片方だけだと、生成物が存在しない CI は緑のまま手元だけが赤くなる）。**判定に gitignore の書式を自前で解釈しない** —— 否定 `!` / グロブ `**/dist/` / 入れ子 `docs/generated/` / ルート固定 `/build/` / 末尾スラッシュの有無 / 名前に含まれるドット `build.v2` と場合分けが尽きず、自前で分類していた版は実際に 5 つの穴（素通り 3・行き止まり 2）を出した。**CSP の文法を正規表現で再実装しようとしたのと同じ altitude の誤り**なので同じ手当てをし、`git check-ignore` に判定させている。
+
+**2 が要る理由**: 違反を数えるだけの検査は、**CSP を消しても `'unsafe-inline'` を足しても緑になる** ——しかもそれは「ハッシュ不一致で赤くなったテストを最短で緑にする」手口そのもの。2 の判定は DOM から取り出した meta の中身に対する数本の素朴な文字列検査で、HTML の解析はブラウザ任せのまま。文法の細部を取りこぼしても**誤って赤くなるだけ**（すぐ気づく）で、緑のまま見逃す側には倒れない ——自前パーサが危険だったのは取りこぼしが**誤った緑**になったからで、向きが逆。
+
+「インライン script が実際に実行されたか」は `e2e/sections.spec.ts` の「portfolio.json 由来の CI バッジが主力カードに描画される」が担う（バッジ 3 枚すべてのラベル内容まで見るので、`csp.spec.ts` へ写すと弱い重複が増えるだけ）。**このテストを「冗長」として消さないこと。**
+
+**なぜ静的解析にしないのか（重要な設計判断）。** 最初は HTML と CSP を自前で解釈して sha256 を突き合わせる Node スクリプトを書いたが、レビューのたびに *その実装が文法を取りこぼす* 経路が出続けた:
+
+> コメント内の `<script>` / 属性値の中の `>` / `script-src-elem` による上書き / meta が複数 / 大文字の `Script-Src-Elem`・`'None'`・`'SHA256-'` / `&#39;` での実体参照 / JS の文字列リテラルの中の `<meta>` / `.htm` 拡張子 / `'unsafe-inline'` との相互作用 …
+
+これは実装の粗さではなく**高度（altitude）の誤り**で、ブラウザの CSP 実装を正規表現で再実装しようとする限り終わらない（実際 460 行まで育ち、4 巡のレビューで塞ぐたびに新しい穴が見つかった）。判定をブラウザに任せれば文法の解釈が不要になり、上の経路はすべて自動的に覆われる。**同じ理由で、この検査を静的解析へ戻さないこと。**
+
+**この方式の代償**: ブラウザを起動する e2e ジョブでしか走らないので、`html-validate` のように数秒では落ちない。それでも「文法を再実装しない」ことの価値が上回ると判断している。
+
+**観測できない違反がある（実測済みの境界）。** CSS が二次的に要求する webfont の `font-src` 違反はこの検査では見えない（`font-src 'none'` にしても全件緑で通る）。stylesheet 取得 → font ファイル要求と第三者ドメインへの往復が 2 回積み上がり、待ち時間の上限に間に合わないため。**この穴は `e2e/visual.spec.ts` が塞いでいる** ——webfont がブロックされると代替フォントで描画され、`playwright.config.ts` の `maxDiffPixelRatio` を大きく超えるピクセル差が出て落ちる。**ページの高さは変わらない**のでサイズ不一致は当てにできず、塞いでいるのは許容差の設定そのもの。**visual.spec.ts を消す・許容差を広げる のどちらも `font-src` の検出を道連れにする。**（**この判断を支える実測値——差分のピクセル比と許容差の余裕——は `e2e/csp.spec.ts` の該当コメントが持つ。数値をここへ写すと、再計測したときに片方だけが古くなる。§6 DRY）
+
+**`waitUntil` を `"domcontentloaded"` にしても速くならない（試して戻した）。** `<head>` の Google Fonts の stylesheet がパーサをブロックし、body 末尾のインライン script はそれを待ってからでないと実行できないため、DOMContentLoaded 自体が stylesheet 取得後にしか発火しない。速くするには第三者フォントを止めるしかないが、そうすると `style-src` の `fonts.googleapis.com` が一度も試されなくなる（許可を外しても緑になる）ので、待ち時間と引き換えにその検査を取っている。（**各 `waitUntil` の実測ミリ秒は `e2e/csp.spec.ts` の該当コメントが持つ。** 上と同じ理由でここへ写さない。§6 DRY）
+
 
 ### セクション追加時のチェックリスト
 

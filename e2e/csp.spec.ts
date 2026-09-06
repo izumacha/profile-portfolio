@@ -93,6 +93,11 @@ function findPages(dir: string, prefix = ""): string[] {
     }
     // 拡張子が .html でなければ対象外
     if (!entry.name.toLowerCase().endsWith(".html")) continue;
+    // 隠しファイル (.preview.html 等) も飛ばす。ディレクトリ側と判定をそろえるだけでなく、
+    // **html-validate の `**\/*.html` が dotfile を拾わない**ため、ここで拾うと
+    // 「html-validate は対象外と判断したのに CSP テストだけが赤くなる」ずれになる
+    // （実測: ルートに .preview.html を置くと html-validate は exit 0、こちらだけ落ちた）
+    if (entry.name.startsWith(".")) continue;
     // 除外指定はファイル名にも効かせる。ディレクトリ名にしか適用しないと、
     // `legacy.html` のような 1 ファイルの除外を html-validate だけが尊重し、
     // こちらは開きに行って「CSP が無い」と赤くする（対象外と宣言したファイルなのに）

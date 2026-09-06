@@ -135,6 +135,8 @@ interface PageObservation {
   policy: string | null;
   // ブラウザが「インラインの JavaScript」として扱う script 要素の数
   inlineScriptCount: number;
+  // CSP meta より前に置かれている（＝ポリシーに支配されない）script 要素の数
+  ungovernedScriptCount: number;
 }
 
 /**
@@ -159,12 +161,16 @@ async function observePage(page: Page, path: string): Promise<PageObservation> {
     });
   });
 
-  // 対象ページを開く。**networkidle は使わない**。
-  // このリポジトリのページは Google Fonts を読むため、networkidle まで待つと
-  // 第三者ドメインへの往復を毎回待つことになり（実測 index.html で 13 秒、
-  // resume.html の 0.6 秒との差はほぼこれ）、その経路が詰まると CSP と無関係な
-  // 理由で CI が赤くなる。他の spec も既定の "load" を使っている。
-  const response = await page.goto(path, { waitUntil: "load" });
+  // 対象ページを開く。**"load" でも "networkidle" でもなく "domcontentloaded"**。
+  // index.html は Google Fonts の stylesheet を <link> で読んでおり、
+  // "load" は stylesheet の取得まで待つため、第三者ドメインへの往復が
+  // そのまま待ち時間になる（実測 index.html 13 秒に対し、フォントを読まない
+  // resume.html は 0.6 秒）。しかもその待ちは goto の既定タイムアウト（30 秒）に
+  // 支配され、下の SETTLE_TIMEOUT_MS では頭打ちにできない ——
+  // フォントの配信が詰まると CSP と無関係な理由で赤くなる。
+  // インライン script の拒否は**解析中**に起きるので domcontentloaded より前に
+  // 観測でき、その後の同一オリジン通信は下の上限付きの待ちで拾う
+  const response = await page.goto(path, { waitUntil: "domcontentloaded" });
   // 200 以外はページが存在しない (404 の本文には CSP が無いので「違反ゼロ」で緑になってしまう)
   expect(response?.status(), `${path} が ${response?.status()} を返した`).toBe(200);
 
@@ -189,16 +195,38 @@ async function observePage(page: Page, path: string): Promise<PageObservation> {
       document.head
         .querySelector<HTMLMetaElement>('meta[http-equiv="Content-Security-Policy" i]')
         ?.getAttribute("content") ?? null,
-    // ブラウザが JavaScript として実行するインライン script の数。
-    // `:not([type])` だけで絞ると **type="module" や type="text/javascript" まで
-    // 数から外れる**。そうなると「インライン script があるなら sha256 が要る」の
-    // 検査が黙って無効になり、sha256 を meta の nonce（公開されるので無意味）へ
-    // 置き換えても全部緑になる。type を解決して判定する
+    // script-src に支配されるインライン script の数。
+    // 判定は**「実行されないと分かっている type の許可リスト以外はすべて対象」**という
+    // 向きにする。実行される MIME を列挙する向きにすると、綴りを 1 つ漏らすたびに
+    // （HTML 仕様の JavaScript MIME には text/jscript や text/javascript1.5 まである）
+    // 「インライン script があるなら sha256 が要る」の検査が**黙って無効**になり、
+    // sha256 を nonce へ置き換えても緑になる。未知の type は対象へ入れて
+    // 誤って赤くなる側へ倒す（すぐ気づけるので安全）。
+    // importmap / speculationrules は JS として評価されないが script-src の対象なので含める
+    // **CSP meta より前に現れる script の数**。meta で配信する CSP は
+    // 「その meta より後ろ」しか支配しないため、head の meta より上に script を置くと
+    // ブラウザは無制限に実行し、違反も起きない（＝違反ゼロで緑のまま素通りする）。
+    // 実際に meta の直前へ script を 1 行足したページが全テストを通った。
+    // 外部 script も同じく素通りするので、src の有無を問わず数える
+    ungovernedScriptCount: (() => {
+      // 判定の基準になる CSP meta を取る
+      const meta = document.head.querySelector('meta[http-equiv="Content-Security-Policy" i]');
+      // すべての script 要素を集める
+      const scripts = [...document.querySelectorAll("script")];
+      // meta が無ければ、そもそも全部が支配されていない
+      if (!meta) return scripts.length;
+      // meta より後ろに無い（＝前にある）script を数える
+      return scripts.filter(
+        (el) => !(meta.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING),
+      ).length;
+    })(),
     inlineScriptCount: [...document.querySelectorAll("script:not([src])")].filter((el) => {
       // type 属性を小文字・前後空白なしへ揃える（属性が無ければ空文字＝既定の JavaScript）
       const type = (el as HTMLScriptElement).type.trim().toLowerCase();
-      // 空 / module / JavaScript の MIME だけが「実行される」
-      return type === "" || type === "module" || /^(text|application)\/(x-)?(java|ecma)script$/.test(type);
+      // script-src に支配されないと分かっているものだけを除く
+      return !["application/ld+json", "application/json", "text/template", "text/html"].includes(
+        type,
+      );
     }).length,
   }));
 }
@@ -226,7 +254,10 @@ test.describe("Content-Security-Policy", () => {
   for (const path of PAGES) {
     test(`${path} の CSP が壊れていない`, async ({ page }) => {
       // ページを開いて観測する（1 回だけ）
-      const { violations, policy, inlineScriptCount } = await observePage(page, path);
+      const { violations, policy, inlineScriptCount, ungovernedScriptCount } = await observePage(
+        page,
+        path,
+      );
 
       // --- 1. ブラウザが実際に何もブロックしていないこと ---
       // 失敗時に「何がブロックされたか」がそのまま読めるメッセージを組み立てる
@@ -289,6 +320,18 @@ test.describe("Content-Security-Policy", () => {
           `${path} の script 系ディレクティブに 'unsafe-eval' がある: ${scriptDirectives}`,
         )
         .not.toContain("'unsafe-eval'");
+
+      // CSP meta より前に script が置かれていないこと。
+      // meta の CSP は「それより後ろ」しか支配しないので、前に置かれた script は
+      // 無制限に実行され、違反イベントも起きない（違反ゼロのまま緑を通る）
+      expect
+        .soft(
+          ungovernedScriptCount,
+          `${path} に CSP meta より前へ置かれた script が ${ungovernedScriptCount} 個ある。` +
+            "meta の CSP はそれより後ろしか支配しないため、この script は無制限に実行される。" +
+            "CSP meta を <head> の先頭側へ移すか、script を meta より後ろへ移してください",
+        )
+        .toBe(0);
 
       // インライン script を持つページは、ハッシュで許可していること
       if (inlineScriptCount > 0) {

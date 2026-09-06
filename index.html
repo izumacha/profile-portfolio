@@ -24,7 +24,7 @@
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'sha256-E0Bqr+2Hn6H+5nVNx5in5XLE4SRif9tEbyvr8qrTLLk='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'"
+      content="default-src 'self'; script-src 'self' 'sha256-81EwpqnZ9qX6AMqEnC6dZlcXoa82BwGUEY9jnCCEdpE='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'"
     />
     <meta name="referrer" content="strict-origin-when-cross-origin" />
 
@@ -2256,7 +2256,11 @@
                   // 「key を持たない要素」として誤って報告し、しかも
                   // **本当の問題（先勝ちの行が黙って別の repo のデータに置き換わる）**を
                   // 一切知らせないままになる
-                  if (byKey[r.key] !== undefined) duplicateKeys.push(r.key);
+                  // 同じ key が 3 回以上現れても報告は 1 回にする
+                  // （毎回積むと "a, a" のように同じ名前が並び、別々の重複に見える）
+                  if (byKey[r.key] !== undefined && duplicateKeys.indexOf(r.key) === -1) {
+                    duplicateKeys.push(r.key);
+                  }
                   byKey[r.key] = r; // キーと repo データを対応表に登録する
                 });
                 // 対応データが見つからなかったカードのキーを溜める配列（走査後にまとめて 1 回だけ知らせる）
@@ -2274,7 +2278,12 @@
                   try {
                     renderCard(card, byKey[key], generatedAt); // 該当データで描画
                   } catch (cardErr) {
-                    // そのカードだけ素のまま縮退させ、どのカードが落ちたかを記録する
+                    // renderCard は最初に容器を空にしてからバッジを 1 つずつ足すため、
+                    // 途中で落ちると「CI バッジだけあって日付が無い」半端な状態が残る。
+                    // 容器を空へ戻して、そのカードだけ確実に素の見た目へ縮退させる
+                    const proof = card.querySelector("[data-proof]");
+                    if (proof) proof.textContent = "";
+                    // どのカードが落ちたかを記録する
                     failedKeys.push(key);
                     console.error("[portfolio] カードのバッジ描画に失敗しました:", key, cardErr);
                   }

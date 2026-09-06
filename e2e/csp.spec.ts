@@ -182,6 +182,24 @@ async function observePage(page: Page, path: string): Promise<PageObservation> {
     // 時間切れ。外部リソースが残っているだけなので、このまま観測へ進む
   });
 
+  // **残っている境界（意図的。塞ごうとして遅くしないこと）。**
+  // 「違反ゼロ」で確実に見えるのは *解析中に起きる違反*（インライン script の拒否・
+  // 静的に書かれた <script src> / <link> の拒否）と、SETTLE_TIMEOUT_MS 内に終わる
+  // 同一オリジンの通信（fetch("data/portfolio.json")）まで。
+  // **CSS が二次的に要求するリソース——具体的には Google Fonts の webfont——は
+  // 上限内に間に合わないことがあり、その font-src 違反はここでは観測できない。**
+  // fonts.googleapis.com の stylesheet を取得してから初めて font ファイルを要求するため、
+  // 第三者ドメインへの往復が 2 回積み上がる（実測でこのページの load は約 13 秒）。
+  // 上限を伸ばして待てば見えるが、CSP と無関係なネットワーク事情でテストが遅く・
+  // 不安定になり、しかも「十分待てたか」は環境依存なので確実にはならない。
+  //
+  // この穴は **e2e/visual.spec.ts が決定的に塞いでいる**。
+  // 同スペックは waitUntil の既定（"load"）でページを開き、全面スクロールののち
+  // toHaveScreenshot で全ページを比較する。font-src が壊れて webfont がブロックされると
+  // 代替フォントで描画され字形も行送りも変わるので、スナップショット比較が必ず落ちる
+  // （1px の高さ差でも落ちる精度がある）。**visual.spec.ts はこの役割も担っているので、
+  // 「見た目の回帰テストだから」と軽く消したり許容差を広げたりしないこと。**
+
   // ページの状態を 1 回の評価でまとめて取り出す
   return page.evaluate(() => ({
     // 溜まった違反
@@ -195,14 +213,6 @@ async function observePage(page: Page, path: string): Promise<PageObservation> {
       document.head
         .querySelector<HTMLMetaElement>('meta[http-equiv="Content-Security-Policy" i]')
         ?.getAttribute("content") ?? null,
-    // script-src に支配されるインライン script の数。
-    // 判定は**「実行されないと分かっている type の許可リスト以外はすべて対象」**という
-    // 向きにする。実行される MIME を列挙する向きにすると、綴りを 1 つ漏らすたびに
-    // （HTML 仕様の JavaScript MIME には text/jscript や text/javascript1.5 まである）
-    // 「インライン script があるなら sha256 が要る」の検査が**黙って無効**になり、
-    // sha256 を nonce へ置き換えても緑になる。未知の type は対象へ入れて
-    // 誤って赤くなる側へ倒す（すぐ気づけるので安全）。
-    // importmap / speculationrules は JS として評価されないが script-src の対象なので含める
     // **CSP meta より前に現れる script の数**。meta で配信する CSP は
     // 「その meta より後ろ」しか支配しないため、head の meta より上に script を置くと
     // ブラウザは無制限に実行し、違反も起きない（＝違反ゼロで緑のまま素通りする）。
@@ -220,6 +230,14 @@ async function observePage(page: Page, path: string): Promise<PageObservation> {
         (el) => !(meta.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING),
       ).length;
     })(),
+    // script-src に支配されるインライン script の数。
+    // 判定は**「実行されないと分かっている type の許可リスト以外はすべて対象」**という
+    // 向きにする。実行される MIME を列挙する向きにすると、綴りを 1 つ漏らすたびに
+    // （HTML 仕様の JavaScript MIME には text/jscript や text/javascript1.5 まである）
+    // 「インライン script があるなら sha256 が要る」の検査が**黙って無効**になり、
+    // sha256 を nonce へ置き換えても緑になる。未知の type は対象へ入れて
+    // 誤って赤くなる側へ倒す（すぐ気づけるので安全）。
+    // importmap / speculationrules は JS として評価されないが script-src の対象なので含める
     inlineScriptCount: [...document.querySelectorAll("script:not([src])")].filter((el) => {
       // type 属性を小文字・前後空白なしへ揃える（属性が無ければ空文字＝既定の JavaScript）
       const type = (el as HTMLScriptElement).type.trim().toLowerCase();

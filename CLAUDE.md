@@ -25,7 +25,7 @@ python -m http.server 8000         # ローカルサーバーで配信して確�
 
 ```bash
 npm ci                                          # 依存インストール（決定的）
-npx html-validate "**/*.html"                    # HTML 構文チェック（除外は .htmlvalidateignore）
+npx html-validate "**/*.{html,htm}"               # HTML 構文チェック（除外は .htmlvalidateignore）
 npx playwright install --with-deps chromium      # 初回のみ: E2E 用ブラウザ
 npm run test:e2e                                 # Playwright（ビジュアルリグレッション + 機能 + CSP 違反）
 npm run test:lighthouse                          # Lighthouse CI（lhci autorun）
@@ -107,9 +107,9 @@ GitHub Pages は HTTP レスポンスヘッダを付けられないため、CSP 
 
 **この方式の代償**: ブラウザを起動する e2e ジョブでしか走らないので、`html-validate` のように数秒では落ちない。それでも「文法を再実装しない」ことの価値が上回ると判断している。
 
-**観測できない違反がある（実測済みの境界）。** CSS が二次的に要求する webfont の `font-src` 違反はこの検査では見えない（`font-src 'none'` にしても 3 件とも緑で通る）。stylesheet 取得 → font ファイル要求と第三者ドメインへの往復が 2 回積み上がり、待ち時間の上限に間に合わないため。**この穴は `e2e/visual.spec.ts` が塞いでいる** ——webfont がブロックされると代替フォントで描画され、実測で全画面の **7.2%** のピクセルが変わり、`playwright.config.ts` の `maxDiffPixelRatio: 0.02`（2%）を大きく超えて落ちる。**ページの高さは変わらない**のでサイズ不一致は当てにできず、塞いでいるのは許容差の設定そのもの。**visual.spec.ts を消す・許容差を 7% 超へ広げる のどちらも `font-src` の検出を道連れにする。**
+**観測できない違反がある（実測済みの境界）。** CSS が二次的に要求する webfont の `font-src` 違反はこの検査では見えない（`font-src 'none'` にしても全件緑で通る）。stylesheet 取得 → font ファイル要求と第三者ドメインへの往復が 2 回積み上がり、待ち時間の上限に間に合わないため。**この穴は `e2e/visual.spec.ts` が塞いでいる** ——webfont がブロックされると代替フォントで描画され、`playwright.config.ts` の `maxDiffPixelRatio` を大きく超えるピクセル差が出て落ちる。**ページの高さは変わらない**のでサイズ不一致は当てにできず、塞いでいるのは許容差の設定そのもの。**visual.spec.ts を消す・許容差を広げる のどちらも `font-src` の検出を道連れにする。**（**この判断を支える実測値——差分のピクセル比と許容差の余裕——は `e2e/csp.spec.ts` の該当コメントが持つ。数値をここへ写すと、再計測したときに片方だけが古くなる。§6 DRY）
 
-**`waitUntil` を `"domcontentloaded"` にしても速くならない（試して戻した）。** `<head>` の Google Fonts の stylesheet がパーサをブロックし、body 末尾のインライン script はそれを待ってからでないと実行できないため、DOMContentLoaded 自体が stylesheet 取得後にしか発火しない（実測 load 12,824ms / domcontentloaded 12,610ms / commit 9ms / フォントを止めた domcontentloaded 24ms）。速くするには第三者フォントを止めるしかないが、そうすると `style-src` の `fonts.googleapis.com` が一度も試されなくなる（許可を外しても緑になる）ので、待ち時間と引き換えにその検査を取っている。
+**`waitUntil` を `"domcontentloaded"` にしても速くならない（試して戻した）。** `<head>` の Google Fonts の stylesheet がパーサをブロックし、body 末尾のインライン script はそれを待ってからでないと実行できないため、DOMContentLoaded 自体が stylesheet 取得後にしか発火しない。速くするには第三者フォントを止めるしかないが、そうすると `style-src` の `fonts.googleapis.com` が一度も試されなくなる（許可を外しても緑になる）ので、待ち時間と引き換えにその検査を取っている。（**各 `waitUntil` の実測ミリ秒は `e2e/csp.spec.ts` の該当コメントが持つ。** 上と同じ理由でここへ写さない。§6 DRY）
 
 
 ### セクション追加時のチェックリスト

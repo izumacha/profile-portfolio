@@ -41,6 +41,10 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
+          # 依存はロックファイルで固定済みなので、~/.npm を再利用して毎回の
+          # フル取得を避ける（この PR で html-validate ジョブにも npm ci が入り、
+          # lint 1 本のために dev 依存一式を毎回落としていた）
+          cache: npm
 
       # html-validate は package.json / package-lock.json でピン留めしたものを使う（§9）。
       # `npx --yes` だと毎回 latest を取りに行き、**この repo に何のコミットも無いまま
@@ -55,9 +59,13 @@ jobs:
       # 対象を "index.html" "resume.html" と書き並べない。写しを持つと、ページを足した人が
       # 追加を忘れた瞬間にそのページだけ黙って構文検査から外れる。
       # html-validate はグロブを自前で解釈するので、シェルに展開させず引用して渡す。
-      # 配信されない HTML（node_modules 等）は .htmlvalidateignore で外す
+      # 配信されない HTML（node_modules 等）は .htmlvalidateignore で外す。
+      # **拡張子は .html と .htm の両方を拾う。** e2e/csp.spec.ts の取りこぼしガードは
+      # `git ls-files -- "*.html" "*.htm"` を「あるべき集合」として使うので、ここが .html だけだと
+      # .htm のページを 1 枚置いた瞬間に「CSP 検査は赤いのに構文検査は素通り」というずれになる
+      # （しかも .htmlvalidateignore へ足しても取りこぼしガードは赤のままで、直し方が無い）
       - name: Validate HTML
-        run: npx html-validate "**/*.html"
+        run: npx html-validate "**/*.{html,htm}"
 
   link-check:
     runs-on: ubuntu-latest
@@ -146,6 +154,10 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
+          # 依存はロックファイルで固定済みなので、~/.npm を再利用して毎回の
+          # フル取得を避ける（この PR で html-validate ジョブにも npm ci が入り、
+          # lint 1 本のために dev 依存一式を毎回落としていた）
+          cache: npm
 
       - name: Install
         run: npm ci

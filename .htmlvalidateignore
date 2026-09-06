@@ -1,6 +1,6 @@
 # html-validate の検査対象から外すパス（.gitignore と同じ書式）。
 #
-# CI は対象を "index.html" "resume.html" と書き並べず `**/*.html` で渡す。
+# CI は対象を "index.html" "resume.html" と書き並べず `**/*.{html,htm}` で渡す。
 # 一覧を手で持つと、3 枚目のページを足した人が追加を忘れた瞬間に
 # そのページだけ黙って構文検査から外れるため（同じ理由で e2e/csp.spec.ts も
 # 対象ページをリポジトリルートから導出している）。
@@ -12,7 +12,7 @@
 # HTML が検査され exit 1 になる）。紛らわしいので同じコミットで削除した。
 #
 # この 1 行を消すと node_modules 配下の HTML 17 枚が検査対象に入る。CI の html-validate
-# ジョブは npm ci を走らせてから `npx html-validate "**/*.html"` を実行する（同じコミットで
+# ジョブは npm ci を走らせてから `npx html-validate "**/*.{html,htm}"` を実行する（同じコミットで
 # `npx --yes` から変えた。理由は ci.yml のコメント）ので、node_modules は存在する。
 # **したがって足し忘れはその場で exit 1 になり、手元と同じ場所・同じ理由で落ちる。**
 # 以前の `npx --yes` 実行では node_modules が無く、気づけるのは npm ci を走らせる

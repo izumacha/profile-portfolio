@@ -44,7 +44,7 @@ const REPO_ROOT = join(__dirname, "..");
 /**
  * 走査しない名前を **.htmlvalidateignore を唯一の源として**読む。
  *
- * CI の html-validate (`**\/*.html`) と同じ範囲を見るためで、ここに写しを持つと
+ * CI の html-validate (`**\/*.{html,htm}`) と同じ範囲を見るためで、ここに写しを持つと
  * 「構文検査はされるのに CSP は検査されない」ページが黙って生まれる。
  *
  * 落とすのは**末尾の `/`**（ディレクトリ指定）だけ。**先頭の `/`（ルート固定）は
@@ -97,14 +97,14 @@ const UNSUPPORTED_IGNORE_ENTRIES = IGNORED_NAMES.filter((e) => /[/*?[\]!]/.test(
 // 対処は 1 つ（.htmlvalidateignore へも足す）なので、行き止まりも起こらない。
 
 /**
- * 検査対象のページを **リポジトリの *.html から再帰で導出する**。
+ * 検査対象のページを **リポジトリの *.html / *.htm から再帰で導出する**。
  *
- * 一覧を手で書き並べない理由は、CI の html-validate をグロブ (`**\/*.html`) に
+ * 一覧を手で書き並べない理由は、CI の html-validate をグロブ (`**\/*.{html,htm}`) に
  * 変えたのと同じ: 写しを持つと、ページを足した人が追加を忘れた瞬間、
  * そのページだけ**黙って**検査対象から外れる。CSP 違反はブラウザのコンソールにしか
  * 出ないので、この網から漏れたページは「JS が丸ごと死んでいるのに CI は緑」のまま公開されうる。
  *
- * 再帰にするのは html-validate の `**\/*.html` と範囲を合わせるため
+ * 再帰にするのは html-validate の `**\/*.{html,htm}` と範囲を合わせるため
  * （片方だけ 1 階層だと、サブディレクトリのページが構文検査だけ受けて CSP は素通りになる）。
  */
 function findPages(dir: string, prefix = ""): string[] {
@@ -125,10 +125,16 @@ function findPages(dir: string, prefix = ""): string[] {
       // このエントリの処理は終わり
       continue;
     }
-    // 拡張子が .html でなければ対象外
-    if (!entry.name.toLowerCase().endsWith(".html")) continue;
+    // 拡張子が .html / .htm でなければ対象外。
+    // **.htm も拾うのは、下の取りこぼしガードが `git ls-files -- "*.html" "*.htm"` を
+    // 「あるべき集合」に使っているため。** ここが .html だけだと、.htm のページを 1 枚
+    // 追跡させた瞬間に UNDERIVED_PAGES へ入って永久に赤くなり、しかも失敗メッセージが
+    // 案内する対処（.htmlvalidateignore から外す・隠しファイルにしない）はどちらも効かない
+    // ——このファイルが「行き止まりを作らない」と書いている当のものになってしまう。
+    // CI の `**/*.{html,htm}` とも範囲がそろう
+    if (!/\.html?$/.test(entry.name.toLowerCase())) continue;
     // 隠しファイル (.preview.html 等) も飛ばす。ディレクトリ側と判定をそろえるだけでなく、
-    // **html-validate の `**\/*.html` が dotfile を拾わない**ため、ここで拾うと
+    // **html-validate の `**\/*.{html,htm}` が dotfile を拾わない**ため、ここで拾うと
     // 「html-validate は対象外と判断したのに CSP テストだけが赤くなる」ずれになる
     // （実測: ルートに .preview.html を置くと html-validate は exit 0、こちらだけ落ちた）
     if (entry.name.startsWith(".")) continue;
@@ -192,7 +198,7 @@ function gitIgnoredPages(paths: ReadonlyArray<string>): string[] {
 const GIT_IGNORED_PAGES = gitIgnoredPages(PAGES);
 
 /**
- * git が追跡している *.html を返す ——**導出とは独立な手がかり**。
+ * git が追跡している *.html / *.htm を返す ——**導出とは独立な手がかり**。
  *
  * 上のガードは「余計なものを拾っていないか」しか見ておらず、**取りこぼしには無力**だった。
  * 実測: 実在の `pages/talks.html`（CSP 無し）を置いて `.htmlvalidateignore` へ
@@ -387,7 +393,7 @@ test.describe("Content-Security-Policy", () => {
       GIT_IGNORED_PAGES,
       "git が無視しているページを CSP の検査対象に拾っています。" +
         "html-validate は .gitignore を読まないので、生成物は .htmlvalidateignore にも" +
-        "書いてください（そうしないと、このテストも `npx html-validate \"**/*.html\"` も" +
+        "書いてください（そうしないと、このテストも `npx html-validate \"**/*.{html,htm}\"` も" +
         "手元でだけ赤くなります）",
     ).toEqual([]);
     // 逆向き ——**取りこぼしていないこと**を、導出とは独立な手がかり（git の追跡対象）で照合する。

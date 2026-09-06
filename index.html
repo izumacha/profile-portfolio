@@ -24,7 +24,7 @@
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'sha256-wCqmmkLzIPDpUgFzeyXz6x/L3WBJC3yUC2No7t4rkbQ='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'"
+      content="default-src 'self'; script-src 'self' 'sha256-E0Bqr+2Hn6H+5nVNx5in5XLE4SRif9tEbyvr8qrTLLk='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'"
     />
     <meta name="referrer" content="strict-origin-when-cross-origin" />
 
@@ -2102,7 +2102,11 @@
       // ---- Live self-proof: 焼き込み JSON でプロジェクトカードに本物の CI/コミット/言語を描画 ----
       (function () {
         // CI 結論コードを「色クラス・日本語ラベル」に対応づける表（portfolio.json の status 値と一致させる）
-        const CI_LABELS = {
+        // Object.create(null) を土台にするのは byKey と同じ理由。素の {} だと
+        // ci.status が "constructor" / "toString" のとき Object.prototype 由来の値が
+        // 引けてしまい、`CI_LABELS[ci.status] || CI_LABELS.none` が truthy を返して
+        // フォールバックが働かず、バッジに文字列 "undefined" が出る
+        const CI_LABELS = Object.assign(Object.create(null), {
           success: { cls: "is-success", label: "CI 成功" }, // ワークフローが正常終了した場合
           failure: { cls: "is-failure", label: "CI 失敗" }, // ワークフローが失敗した場合
           cancelled: { cls: "is-failure", label: "CI 中止" }, // ワークフローがキャンセルされた場合
@@ -2110,7 +2114,7 @@
           in_progress: { cls: "is-running", label: "CI 実行中" }, // まだ実行中の場合
           skipped: { cls: "", label: "CI スキップ" }, // ジョブがスキップされた場合
           none: { cls: "", label: "CI 情報なし" }, // CI 情報がない・未走行の場合
-        };
+        });
 
         // ISO 日時を「YYYY/MM/DD」形式に整形する（空文字や不正値は null を返す）
         function formatDate(iso) {

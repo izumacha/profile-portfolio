@@ -9,3 +9,4 @@ node_modules/
 test-results/
 test-results-recheck/
 playwright-report/
+.lighthouseci/

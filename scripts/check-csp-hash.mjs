@@ -34,10 +34,13 @@
  * 依存を増やさない（§9 サプライチェーン最小化）ため外部パッケージは使わず、Node 標準だけで組み立てる。
  */
 
+// git に追跡ファイルを列挙させるための Node 標準モジュール（Promise 版に包む）
+import { execFile as execFileCallback } from "node:child_process";
+import { promisify } from "node:util";
 // SHA-256 を計算するための Node 標準モジュール
 import { createHash } from "node:crypto";
 // HTML ファイルを読むための Node 標準モジュール（Promise 版）
-import { readdir, readFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 // このファイルの位置からリポジトリのルートを求めるために使う
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -45,54 +48,31 @@ import { fileURLToPath } from "node:url";
 // このスクリプトが置かれている scripts/ の 1 つ上＝リポジトリのルート
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
-// 走査しないディレクトリ。配信されない（＝CSP を持つ必要がない）ものだけを挙げる。
-// node_modules は依存パッケージ同梱の HTML が大量に入っており、検査対象ではない
-const SKIPPED_DIRS = new Set([
-  ".git", // Git の内部データ
-  "node_modules", // 依存パッケージ（配信されない）
-  "test-results", // Playwright の実行結果（gitignore 対象）
-  "test-results-recheck", // Playwright の再実行結果（同上）
-  "playwright-report", // Playwright のレポート（同上）
-]);
+// execFile を await できる形にする
+const execFile = promisify(execFileCallback);
 
 /**
- * 検査対象のページを **リポジトリ内の *.html から導出する**（再帰）。
+ * 検査対象のページを **git が追跡している *.html から導出する**。
  *
  * 一覧を手で書き並べない理由は、この検査自身が塞いだ fail-open とまったく同じ。
- * 写しを持つと、3 枚目の HTML を足した人が一覧への追加を忘れた瞬間、
+ * 写しを持つと、ページを足した人が一覧への追加を忘れた瞬間、
  * そのページだけ**黙って**検査対象から外れる（緑のまま通る）。
  *
- * ルート直下だけでなく再帰で拾うのは、GitHub Pages が**リポジトリ全体を配信する**ため。
- * `docs/demo.html` のようなサブディレクトリのページも実際に開ける URL なので、
- * ルートだけを見ると「1 つ下の階層で同じ取りこぼしが起きる」状態が残る。
+ * ディレクトリを歩いて拾うのではなく **git の追跡ファイル**を使うのが要点。
+ * GitHub Pages が配信するのは**コミットされた内容**なので、「配信されるページ」と
+ * 「追跡されているページ」は定義上そのまま一致する。歩く方式だと、配信されない
+ * 生成物（`.lighthouseci/` の Lighthouse レポート、`test-results/` の Playwright の
+ * 出力など）を拾ってしまい、**§2 に書いてある手順どおりに `npm run test:lighthouse` を
+ * 流しただけで次の `check:csp` が赤くなる**。それを除外リストで避けようとすると、
+ * 生成物が増えるたびに育つ手書きの写しがまた 1 つ生まれる。
  *
- * @param {string} dir 走査するディレクトリの絶対パス
- * @param {string} prefix 表示用の相対パス（先頭は空文字）
  * @returns {Promise<string[]>} リポジトリルートからの相対パス（名前順）
  */
-async function findPages(dir = REPO_ROOT, prefix = "") {
-  // このディレクトリの中身を種類付きで読み取る
-  const entries = await readdir(dir, { withFileTypes: true });
-  // 見つかったページを溜める配列
-  const found = [];
-  // 名前順に安定させてから 1 件ずつ見る
-  for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
-    // 表示・読み込みに使う相対パスを組み立てる
-    const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
-    // ディレクトリなら、除外対象でない限り 1 つ下も見る
-    if (entry.isDirectory()) {
-      // 配信されないディレクトリは丸ごと飛ばす
-      if (SKIPPED_DIRS.has(entry.name)) continue;
-      // 下の階層で見つかったページを足す
-      found.push(...(await findPages(join(dir, entry.name), relative)));
-      // このエントリの処理は終わり
-      continue;
-    }
-    // 拡張子が .html のファイルだけを検査対象に採る
-    if (entry.isFile() && entry.name.toLowerCase().endsWith(".html")) found.push(relative);
-  }
-  // 見つかったページの相対パスを返す
-  return found;
+async function findPages() {
+  // git に追跡中の HTML を列挙してもらう（引数は配列で渡し、シェルを経由させない。§9）
+  const { stdout } = await execFile("git", ["ls-files", "-z", "*.html"], { cwd: REPO_ROOT });
+  // -z は NUL 区切り。末尾の空要素を落としてから名前順に整える
+  return stdout.split("\0").filter(Boolean).sort();
 }
 
 // HTML を左から順に読み進めるための走査用パターン。
@@ -118,13 +98,18 @@ const HTML_SCAN_RE =
 // 値は "..." / '...' / 引用符なし のいずれにも対応する
 const ATTR_RE = /([^\s=/>]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/g;
 
-// CSP の meta タグを拾うパターン。**script の走査と同じくコメントを先に消費する**。
+// meta タグを拾うパターン。**script の走査と同じくコメントを先に消費する**。
 // これを怠ると、デバッグのために CSP をコメントアウトしたページが
 // 「CSP が 1 つある」ものとして読まれ、**配信物には CSP が 1 つも無いのに緑**になる
 // （逆に、例として書いたコメント内の meta を実物と数えて「2 個あります」と誤検知もする）。
-// script 側だけコメント対策をして meta 側でしていなかったのは、同じ穴の書き忘れだった
-const CSP_META_SCAN_RE =
-  /<!--[\s\S]*?-->|<meta\s+http-equiv="Content-Security-Policy"\s+content="([^"]*)"/gi;
+//
+// 属性の並びや引用符を決め打ちせず、開始タグを丸ごと拾って ATTR_RE で解釈するのが要点。
+// `http-equiv="..."` の直後に `content="..."` が来る形だけを見ていた頃は、
+// **属性を入れ替えて書いた 2 枚目の CSP が丸ごと見えず**、複数 meta を落とす門番を
+// 素通りした（ブラウザは両方のポリシーを重ねるので script は拒否される）。
+// 逆に、正しい CSP を `content` 先行で書いただけで「meta が見つかりません」と誤検知もした
+const META_SCAN_RE =
+  /<!--[\s\S]*?-->|<meta\b((?:"[^"]*"|'[^']*'|[^>"'])*)>/gi;
 
 // インライン script 要素を支配するディレクティブを、優先度の高い順に並べたもの。
 // CSP3 では script 要素は script-src-elem が支配し、あれば script-src は**無視される**。
@@ -280,8 +265,17 @@ function collectScripts(html, label) {
  * @returns {string | null} 実効ディレクティブの値（決められなければ null）
  */
 function readEffectiveScriptDirective(html, label) {
-  // CSP の meta タグを全件拾う（コメント側が一致した回は捕獲グループが未定義なので落とす）
-  const metas = [...html.matchAll(CSP_META_SCAN_RE)].filter((m) => m[1] !== undefined);
+  // meta タグを全件拾い、http-equiv が Content-Security-Policy のものだけ残す。
+  // 名前・値の照合は小文字で行う（HTML の属性名も http-equiv の値も大文字小文字を区別しない）
+  const metas = [...html.matchAll(META_SCAN_RE)]
+    // コメント側が一致した回は捕獲グループが未定義なので落とす
+    .filter((m) => m[1] !== undefined)
+    // 開始タグの属性を解釈する
+    .map((m) => parseAttributes(m[1]))
+    // CSP の meta だけに絞る
+    .filter((attrs) => (attrs.get("http-equiv") ?? "").trim().toLowerCase() === "content-security-policy")
+    // 実際に読むのは content 属性の中身（無ければ空文字）
+    .map((attrs) => attrs.get("content") ?? "");
   // meta ごと無ければ検査の前提が崩れているので落とす（fail-closed）
   if (metas.length === 0) {
     problems.push(`${label}: Content-Security-Policy の meta タグが見つかりません。`);
@@ -303,7 +297,7 @@ function readEffectiveScriptDirective(html, label) {
   // `d.startsWith(name + " ")` のような判定だと、`Script-Src-Elem` と書かれた場合や、
   // 長い CSP を読みやすさのために改行した場合に見つけられず、静かに script-src へ
   // フォールバックしてしまう（＝ script-src-elem を見張るために足した対策が効かない）
-  const directives = metas[0][1]
+  const directives = metas[0]
     .split(";")
     .map((d) => d.trim())
     .filter(Boolean)
@@ -311,7 +305,15 @@ function readEffectiveScriptDirective(html, label) {
       // 空白の並びで名前と値に切り分ける
       const parts = d.split(/\s+/);
       // 先頭がディレクティブ名（小文字へ揃える）、残りが値のリスト
-      return { name: parts[0].toLowerCase(), values: parts.slice(1), raw: d };
+      // 値も小文字へ揃えたものを別に持つ。CSP のキーワード（'none' / 'self' 等）は
+      // 大文字小文字を区別しないので、`'None'` と書かれた最小権限のページを
+      // 「緩い」と誤検知しないため（ハッシュは base64 なので raw 側で比べる）
+      return {
+        name: parts[0].toLowerCase(),
+        values: parts.slice(1),
+        keywords: parts.slice(1).map((v) => v.toLowerCase()),
+        raw: d,
+      };
     });
 
   // 優先度の高い順に、最初に見つかったものが実効ディレクティブになる
@@ -364,6 +366,13 @@ async function checkPage(fileName) {
   // 実際のインライン script から計算したハッシュをすべて求める
   const actual = inlineBodies.map(sha256Base64);
 
+  // 直すべき場所は「実効ディレクティブが何だったか」で決まる。規則 A / B で同じ判断を使う。
+  // default-src へフォールバックしているページに「その宣言を直せ」と読ませると、
+  // 画像・スタイル・フォントまで巻き込む（規則 B だけがこの分岐を持っていて、
+  // 規則 A は default-src に sha256 を足すよう案内していた ——同じページ形状に対して
+  // 2 つの規則が矛盾した指示を出していた）
+  const fallsBackToDefaultSrc = scriptSrc.name === "default-src";
+
   // --- 規則 A: 宣言されたトークンの集合と、実際のハッシュの集合が過不足なく一致すること ---
   // 宣言側にあって実物が無いトークン（script を消したのに残っている／値が古い）
   const staleTokens = declared.filter((d) => !actual.includes(d));
@@ -384,20 +393,46 @@ async function checkPage(fileName) {
         (missingTokens.length > 0
           ? `  宣言が足りない script のハッシュ（追加する）:\n${missingTokens.map((t) => `    'sha256-${t}'`).join("\n")}\n`
           : "") +
-        `  対応: ${fileName} の CSP meta 内 ${scriptSrc.name} の sha256 トークンを上の内容へ合わせてください。`,
+        (fallsBackToDefaultSrc
+          ? `  対応: ${fileName} の CSP meta へ script-src を新しく追加し、そこに上のハッシュを並べてください` +
+            `（現在は ${scriptSrc.name} にフォールバックしています。${scriptSrc.name} 側へ足すと` +
+            "画像・スタイル・フォントの許可まで広がります）。"
+          : `  対応: ${fileName} の CSP meta 内 ${scriptSrc.name} の sha256 トークンを上の内容へ合わせてください。`),
     );
+  }
+
+  // --- 規則 C: 外部 script があるなら、実効ディレクティブがそれを読み込める形であること ---
+  // 規則 A は sha256 とインライン script の対応しか見ないため、外部 script は
+  // 「数えるだけで検証されない」状態だった。`script-src 'none'` のページに
+  // <script src="app.js"> を足しても緑で通り、ブラウザは app.js を読み込まない
+  // ——この検査が存在する目的（JS が丸ごと死んでいるのに CI は緑）そのものが起きる。
+  if (externalCount > 0) {
+    // ハッシュ・nonce は「インラインを許す」ための指定で、外部の読み込み元にはならない。
+    // それ以外の値（'self' / ホスト名 / スキーム）が 1 つでも要る
+    const allowsExternal =
+      !scriptSrc.keywords.includes("'none'") &&
+      scriptSrc.values.some((v) => !/^'(sha(256|384|512)-|nonce-)/.test(v));
+    // 読み込める形になっていなければ、その外部 script はブラウザに拒否される
+    if (!allowsExternal) {
+      problems.push(
+        `${fileName}: 外部 script が ${externalCount} 個ありますが、` +
+          `${scriptSrc.name} に読み込み元の指定（'self' やホスト名）がありません。` +
+          " このままだとブラウザが読み込みを拒否します。\n" +
+          `  現在の実効ディレクティブ: ${scriptSrc.raw}`,
+      );
+    }
   }
 
   // --- 規則 B: script を 1 つも持たないページは 'none'（最小権限）---
   // インラインも外部も無いのに 'none' でなければ、宣言が実態より緩い。
   // 値の照合はトークン単位で行う（部分文字列で見ると 'none' を含む別の値に釣られる）
-  if (inlineBodies.length === 0 && externalCount === 0 && !scriptSrc.values.includes("'none'")) {
+  if (inlineBodies.length === 0 && externalCount === 0 && !scriptSrc.keywords.includes("'none'")) {
     // 直すべき場所は「実効ディレクティブが何だったか」で変わる。
     // default-src へフォールバックしている場合に「その宣言を 'none' にせよ」と読ませると、
     // default-src 'none' にされてスタイルも画像もフォントも止まる（緑のまま画面が壊れる）。
     // その場合は **新しく script-src を足す** よう案内する
     const remedy =
-      scriptSrc.name === "default-src"
+      fallsBackToDefaultSrc
         ? `script-src 'none' を新しく追加してください（現在は ${scriptSrc.name} にフォールバックしています。` +
           `${scriptSrc.name} 自体を 'none' にすると画像・スタイル・フォントまで止まります）`
         : `${scriptSrc.name} を 'none' にしてください`;

@@ -40,16 +40,41 @@ import { test, expect, type Page } from "@playwright/test";
 // Playwright は spec を CJS へ変換して読み込むため import.meta は使えず、__dirname を使う
 const REPO_ROOT = join(__dirname, "..");
 
+/**
+ * gitignore 書式のファイルを読み、指定を**正規化した名前**の配列にする。
+ *
+ * .htmlvalidateignore と .gitignore の両方をこの 1 か所で解釈する。
+ * 別々に書くと、片方だけ直したときに 2 つの一覧がずれ（下のガードはまさにその
+ * ずれを見張っているのに）検査そのものが当てにならなくなる（§6 DRY）。
+ *
+ * ここで落とすのは**末尾の `/`**（ディレクトリ指定）だけ。**先頭の `/`（ルート固定）は
+ * わざと残す** —— findPages は素の名前しか照合できずルート固定を再現できないので、
+ * .htmlvalidateignore 側に `/build/` と書かれたら
+ * 「html-validate はルート直下だけを外すのに、こちらは深い階層の build も飛ばす」
+ * というずれになる。残しておけば UNSUPPORTED_IGNORE_ENTRIES が `/` を見て落とす。
+ * .gitignore 側は「何を要求するか」を決めるだけなので、そちらで先頭の `/` を落とす。
+ *
+ * @param name リポジトリルートからのファイル名
+ * @returns コメント・空行を除き、末尾の / を落とした指定の配列
+ */
+function parseIgnoreFile(name: string): string[] {
+  // ファイルを UTF-8 で読み、行に分ける
+  return (
+    readFileSync(join(REPO_ROOT, name), "utf8")
+      .split("\n")
+      // 前後の空白を落とす
+      .map((line) => line.trim())
+      // コメント行と空行を落とす
+      .filter((line) => line && !line.startsWith("#"))
+      // 末尾の / を落として素の名前へそろえる
+      .map((line) => line.replace(/\/$/, ""))
+  );
+}
+
 // 走査しない名前は .htmlvalidateignore を唯一の源として読む。
 // CI の html-validate (`**/*.html`) と同じ範囲を見るためで、ここに写しを持つと
 // 「構文検査はされるのに CSP は検査されない」ページが黙って生まれる
-const IGNORED_NAMES = readFileSync(join(REPO_ROOT, ".htmlvalidateignore"), "utf8")
-  .split("\n")
-  // コメント行と空行を落とす
-  .map((line) => line.trim())
-  .filter((line) => line && !line.startsWith("#"))
-  // "node_modules/" のような書き方から末尾の / を外してディレクトリ名にする
-  .map((line) => line.replace(/\/$/, ""));
+const IGNORED_NAMES = parseIgnoreFile(".htmlvalidateignore");
 
 // この導出が扱えるのは「単一のディレクトリ名」だけ。html-validate は gitignore の
 // 書式をひととおり解釈するので、`docs/legacy/` や `**/generated/` のような書き方を
@@ -62,22 +87,45 @@ const IGNORED_NAMES = readFileSync(join(REPO_ROOT, ".htmlvalidateignore"), "utf8
 // 「構文検査はされるのに CSP は検査されない」状態を作れてしまう
 const UNSUPPORTED_IGNORE_ENTRIES = IGNORED_NAMES.filter((e) => /[/*?[\]!]/.test(e));
 
-// .gitignore に書かれた「隠しでないディレクトリ」の一覧。
+// .gitignore に書かれた「HTML を含みうる無視対象」の一覧。
 // html-validate は .gitignore を読まないので生成物の一覧は 2 か所に要る ——
 // このファイルが対象ページの一覧を持たない理由（写しは必ず片方が古くなる）と同じ問題が、
 // ここだけは統合できずに残る。**せめて片方への足し忘れは機械的に落とす**（下のガード）。
-// 隠しディレクトリ (.lighthouseci/ 等) を対象外にするのは、findPages も
-// html-validate の `**\/*.html` も dotfile を最初から見ないため、
-// .htmlvalidateignore へ書く必要が無いから（要求すると実行不能な指示になる）
-const GITIGNORED_DIRS = readFileSync(join(REPO_ROOT, ".gitignore"), "utf8")
-  .split("\n")
-  // コメント行と空行を落とす
-  .map((line) => line.trim())
-  .filter((line) => line && !line.startsWith("#"))
-  // 末尾が / のもの＝ディレクトリ指定だけを残し、隠しディレクトリは除く
-  .filter((line) => line.endsWith("/") && !line.startsWith("."))
-  // 末尾の / を外して名前にそろえる
-  .map((line) => line.replace(/\/$/, ""));
+//
+// **末尾の `/` の有無で選り分けてはいけない。** gitignore ではディレクトリを
+// `dist`（スラッシュ無し）とも書け、そちらの方がむしろ一般的。スラッシュ付きだけを
+// 見ると、いちばん普通の書き方をした人だけがこのガードをすり抜ける
+// （実測で `dist` は素通りした）。そこで**書き方ではなく「名前の形」で判定する**。
+//
+// 除くのは 3 種類で、いずれも「足せと言っても意味が無い」もの:
+//   - 隠し名 (.lighthouseci / .env / .claude 等) — findPages も html-validate の
+//     `**\/*.html` も dotfile を最初から見ないので、書く必要が無い
+//   - グロブを含む指定 (*.log 等) — .htmlvalidateignore 側の素の名前と対応しない
+//     （そもそも UNSUPPORTED_IGNORE_ENTRIES がそういう書き方を弾いている）
+//   - 拡張子を持つ名前 (untracked-snapshot-files.txt) — ファイルであってディレクトリ
+//     ではないので、中に HTML を抱えることがない
+//
+// **先頭の `/`（ルート固定）はここで落とす。** `/build/` と書いた人へ `/build` を
+// .htmlvalidateignore へ足せと要求すると、`/` を含むので UNSUPPORTED_IGNORE_ENTRIES が
+// 落ちる ——**どちらのガードも同時には満たせない行き止まり**になる（実測で確認した）。
+// 要求するのは素の名前 `build` にする（そちらは findPages が扱える書き方）
+const GITIGNORE_DIR_ENTRIES = parseIgnoreFile(".gitignore")
+  // ルート固定の先頭 / を落として、要求する側の名前をそろえる
+  .map((e) => e.replace(/^\//, ""))
+  // 「足せと言っても意味が無い」3 種類を除く（上のコメント参照）
+  .filter((e) => !e.startsWith(".") && !/[*?[\]!]/.test(e) && !/\.[^./]+$/.test(e));
+
+// そのうち **入れ子のパス**（`docs/generated` 等）。findPages は素の名前しか照合できず
+// 再現できないので、**突き合わせの対象から外して別の指示を出す**。
+// 外さずに要求すると `/build/` と同じ行き止まりになる: `docs/generated` を
+// .htmlvalidateignore へ足せと言われ、足すと `/` を含むので UNSUPPORTED_IGNORE_ENTRIES が
+// 落ちる（実測で両方赤になることを確認した）。黙って無視もしない ——
+// その配下の HTML は findPages が実際に開きに行くので、
+// 「CSP が無い」という分かりにくい失敗になる前に、対処法を添えてここで落とす
+const NESTED_GITIGNORE_DIRS = GITIGNORE_DIR_ENTRIES.filter((e) => e.includes("/"));
+
+// 突き合わせるのは findPages が扱える「素の名前」だけ
+const GITIGNORED_DIRS = GITIGNORE_DIR_ENTRIES.filter((e) => !e.includes("/"));
 
 // .gitignore にあるのに .htmlvalidateignore に無いディレクトリ（＝足し忘れ）
 const UNIGNORED_BUILD_DIRS = GITIGNORED_DIRS.filter((d) => !IGNORED_NAMES.includes(d));
@@ -210,7 +258,12 @@ async function observePage(page: Page, path: string): Promise<PageObservation> {
   // 落ち着くのを待つ。上限を付けるのは、外部フォントが遅い環境で待ち続けないため。
   // 時間切れは異常ではない（待つ価値のある通信は既に終わっている）ので、
   // 例外にせず先へ進む —— 握り潰しではなく「上限付きの待ち」であることを明示する
-  await page.waitForLoadState("networkidle", { timeout: SETTLE_TIMEOUT_MS }).catch(() => {
+  await page.waitForLoadState("networkidle", { timeout: SETTLE_TIMEOUT_MS }).catch((err) => {
+    // **時間切れだけを飲み込む。** 何でも握り潰すと（§6 違反）、ページのクラッシュや
+    // ブラウザの終了までここで消え、続く page.evaluate が
+    // 「Target page has been closed」という二次的で分かりにくい失敗に化けて、
+    // 本当の原因が報告に残らない。時間切れ以外はそのまま投げ直す
+    if (!(err instanceof Error) || err.name !== "TimeoutError") throw err;
     // 時間切れ。外部リソースが残っているだけなので、このまま観測へ進む
   });
 
@@ -307,6 +360,16 @@ test.describe("Content-Security-Policy", () => {
       ".gitignore にあるディレクトリが .htmlvalidateignore に載っていません。" +
         "html-validate は .gitignore を読まないので、生成物ディレクトリは両方に書いてください",
     ).toEqual([]);
+    // 入れ子のパスは findPages が再現できないので、突き合わせではなく専用の指示で落とす。
+    // 上の突き合わせに混ぜると「足せと言われた形が扱えない書き方だった」という
+    // 行き止まりになるため、対処法の違う 2 つを別々のメッセージにしてある
+    expect(
+      NESTED_GITIGNORE_DIRS,
+      ".gitignore に入れ子のパス指定があります。e2e/csp.spec.ts の findPages は" +
+        "素のディレクトリ名しか照合できないため、この配下の HTML を開きに行って" +
+        "「CSP が無い」と誤って赤くなります。素のディレクトリ名で書く" +
+        "（そのうえで .htmlvalidateignore にも足す）か、findPages を拡張してください",
+    ).toEqual([]);
   });
 
   // 対象ページを 1 枚ずつ検証する。
@@ -351,6 +414,9 @@ test.describe("Content-Security-Policy", () => {
         .not.toBe("");
 
       // script 系ディレクティブだけを取り出す (style-src は 'unsafe-inline' を正当に使うため)。
+      // **`script-src-attr` を書き並べていないが、これも拾える**（`script-src` の直後の
+      // `\b` がハイフンとの境界に当たるため）。インラインのイベントハンドラを解禁する
+      // `script-src-attr 'unsafe-inline'` を足す変異が実際に赤くなることを確認済み。
       // ここは素朴な文字列処理でよい。取りこぼしても**誤って赤くなるだけ**で、
       // 緑のまま見逃す側には倒れない（自前パーサが危険だったのは逆向きだったから）
       const scriptDirectives = (policy ?? "")

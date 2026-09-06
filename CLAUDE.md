@@ -25,7 +25,7 @@ python -m http.server 8000         # ローカルサーバーで配信して確�
 
 ```bash
 npm ci                                          # 依存インストール（決定的）
-npx --yes html-validate index.html resume.html  # HTML 構文チェック
+npx --yes html-validate "**/*.html"             # HTML 構文チェック（除外は .htmlvalidateignore）
 npm run check:csp                                # CSP の sha256 とインライン script の一致検査
 npx playwright install --with-deps chromium      # 初回のみ: E2E 用ブラウザ
 npm run test:e2e                                 # Playwright ビジュアルリグレッション
@@ -56,6 +56,7 @@ GIF 化に `ffmpeg` を使うため事前にインストールしておく。ブ
 | `data/portfolio.json` | 各プロジェクトの CI 結果・最終コミット・言語の焼き込みデータ。`index.html` の「Live self-proof」バッジがこれを fetch する（**自動生成物**。`.github/workflows/update-portfolio-data.yml` が更新する） |
 | `e2e/sections.spec.ts` | セクション表示・ナビゲーションの E2E（§2 の `npm run test:e2e`） |
 | `e2e/visual.spec.ts` | ビジュアルリグレッション（スナップショット比較） |
+| `.htmlvalidateignore` | html-validate の検査対象から外すパス（配信されない HTML） |
 | `.gitattributes` | 改行を LF に固定する（CSP の sha256 が CRLF チェックアウトでずれないようにするため。下記） |
 | `scripts/check-csp-hash.mjs` | CSP の sha256 とインライン script の一致を検査するスクリプト（下記） |
 | `scripts/capture-screenshots.mjs` | README 掲載用スクショ・デモ GIF の自動撮影スクリプト（§15） |
@@ -87,7 +88,7 @@ GitHub Pages は HTTP レスポンスヘッダを付けられないため、CSP 
 
 ページごとに別の判定を書かないのが要点。当初は `index.html` だけがハッシュを検証し `resume.html` は「`'none'` を宣言しているか」しか見ていなかったため、**`resume.html` が script を持って `'none'` をやめた瞬間（＝検査自身が案内する移行先）にそのページのハッシュを誰も検証しなくなる** fail-open があった。
 
-**検査対象のページは一覧を書かず、リポジトリルートの `*.html` から導出する。** 写しを持つと、3 枚目の HTML を足した人が追加を忘れた瞬間にそのページだけ黙って検査対象から外れる（規則をページごとに分けなかったのと同じ理由）。
+**検査対象のページは一覧を書かず、リポジトリ内の `*.html` から再帰で導出する。** GitHub Pages はリポジトリ全体を配信するので `docs/…` のページも実際に開ける URL になる（配信されない `node_modules` 等だけ除外する）。 写しを持つと、3 枚目の HTML を足した人が追加を忘れた瞬間にそのページだけ黙って検査対象から外れる（規則をページごとに分けなかったのと同じ理由）。
 
 実装上の注意（いずれも実際に取り違えた／レビューで指摘された点）:
 
@@ -96,6 +97,10 @@ GitHub Pages は HTTP レスポンスヘッダを付けられないため、CSP 
 - **script の判定は大文字小文字を無視し、`src` は属性名の完全一致で見る**（`data-src=` を外部 script と誤認しない）。
 - **実行される `type` は許可リストで持つ**（拒否リストにすると `application/json` のようなデータ島を「実行対象」と数え、ブラウザが実行しないブロックのために sha256 を足せという誤った案内を出す）。どちらの一覧にも無い `type` は fail-closed で落とす。
 - **`script-src` だけを見ない。** CSP3 では script 要素は `script-src-elem` が支配し、あれば `script-src` は**無視される** —— `script-src-elem 'self'` を足すだけで検査が緑のままブラウザが拒否する。`script-src-elem` → `script-src` → `default-src` の優先順で実効ディレクティブを決める。
+- **CSP の meta を探すときもコメントを先に消費する。** script 側だけ対策して meta 側でしていないと、デバッグのため CSP をコメントアウトしたページが「CSP がある」ものとして読まれ、**配信物には CSP が 1 つも無いのに緑**になる。
+- **ディレクティブ名は小文字化して比べ、名前と値は `/\s+/` で切る。** CSP の文法上、名前は大文字小文字を区別せず、区切りは SP に限らない。`startsWith(name + " ")` だと `Script-Src-Elem` や、長い CSP を読みやすく改行しただけで見つけられず、静かに `script-src` へフォールバックする。
+- **`speculationrules` は「実行される」側に分類する。** ブラウザが JS として評価しないことと `script-src` に支配されないことは別（`'inline-speculation-rules'` というソース式があるのがその証拠）。非実行側へ入れるとハッシュを要求しないまま緑になる。
+- **規則 B の案内は実効ディレクティブの名前で出し分ける。** `default-src` へフォールバックしているページに「その宣言を `'none'` にせよ」と読ませると、画像・スタイル・フォントまで止まる。その場合は `script-src 'none'` を**新しく足す**よう案内する。
 - **CSP の meta が複数あったら落とす。** ブラウザは全ポリシーを重ねて強制するので、1 つ目だけ読むと 2 つ目の `script-src 'none'` を見落とす。積集合の再現には踏み込まず fail-closed にしてある。
 - **CR を含むファイルは落とす**（LF へ正規化して合わせない）。配信されるのはコミット済みの blob なので、正規化すると「blob が本当に CRLF なのに緑」という逆向きの取りこぼしになる。落とす側に倒せば `.gitattributes` の効き目も同時に確かめられる（§10）。
 

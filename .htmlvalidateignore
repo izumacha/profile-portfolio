@@ -1,0 +1,11 @@
+# html-validate の検査対象から外すパス（.gitignore と同じ書式）。
+#
+# CI は対象を "index.html" "resume.html" と書き並べず `**/*.html` で渡す。
+# 一覧を手で持つと、3 枚目のページを足した人が追加を忘れた瞬間に
+# そのページだけ黙って構文検査から外れるため（同じ理由で
+# scripts/check-csp-hash.mjs も対象をリポジトリから導出している）。
+# その代わり、配信されない HTML はここで明示的に外す。
+node_modules/
+test-results/
+test-results-recheck/
+playwright-report/

@@ -45,21 +45,54 @@ import { fileURLToPath } from "node:url";
 // このスクリプトが置かれている scripts/ の 1 つ上＝リポジトリのルート
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
+// 走査しないディレクトリ。配信されない（＝CSP を持つ必要がない）ものだけを挙げる。
+// node_modules は依存パッケージ同梱の HTML が大量に入っており、検査対象ではない
+const SKIPPED_DIRS = new Set([
+  ".git", // Git の内部データ
+  "node_modules", // 依存パッケージ（配信されない）
+  "test-results", // Playwright の実行結果（gitignore 対象）
+  "test-results-recheck", // Playwright の再実行結果（同上）
+  "playwright-report", // Playwright のレポート（同上）
+]);
+
 /**
- * 検査対象のページを **リポジトリルートの *.html から導出する**。
+ * 検査対象のページを **リポジトリ内の *.html から導出する**（再帰）。
  *
  * 一覧を手で書き並べない理由は、この検査自身が塞いだ fail-open とまったく同じ。
  * 写しを持つと、3 枚目の HTML を足した人が一覧への追加を忘れた瞬間、
  * そのページだけ**黙って**検査対象から外れる（緑のまま通る）。
- * ルートを読んで拾えば、追加漏れという状態がそもそも作れない。
  *
- * @returns {Promise<string[]>} ルート直下の HTML ファイル名（名前順）
+ * ルート直下だけでなく再帰で拾うのは、GitHub Pages が**リポジトリ全体を配信する**ため。
+ * `docs/demo.html` のようなサブディレクトリのページも実際に開ける URL なので、
+ * ルートだけを見ると「1 つ下の階層で同じ取りこぼしが起きる」状態が残る。
+ *
+ * @param {string} dir 走査するディレクトリの絶対パス
+ * @param {string} prefix 表示用の相対パス（先頭は空文字）
+ * @returns {Promise<string[]>} リポジトリルートからの相対パス（名前順）
  */
-async function findPages() {
-  // ルート直下のファイル・ディレクトリ名を読み取る
-  const entries = await readdir(REPO_ROOT);
-  // 拡張子が .html のものだけを名前順に採る
-  return entries.filter((name) => name.toLowerCase().endsWith(".html")).sort();
+async function findPages(dir = REPO_ROOT, prefix = "") {
+  // このディレクトリの中身を種類付きで読み取る
+  const entries = await readdir(dir, { withFileTypes: true });
+  // 見つかったページを溜める配列
+  const found = [];
+  // 名前順に安定させてから 1 件ずつ見る
+  for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+    // 表示・読み込みに使う相対パスを組み立てる
+    const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
+    // ディレクトリなら、除外対象でない限り 1 つ下も見る
+    if (entry.isDirectory()) {
+      // 配信されないディレクトリは丸ごと飛ばす
+      if (SKIPPED_DIRS.has(entry.name)) continue;
+      // 下の階層で見つかったページを足す
+      found.push(...(await findPages(join(dir, entry.name), relative)));
+      // このエントリの処理は終わり
+      continue;
+    }
+    // 拡張子が .html のファイルだけを検査対象に採る
+    if (entry.isFile() && entry.name.toLowerCase().endsWith(".html")) found.push(relative);
+  }
+  // 見つかったページの相対パスを返す
+  return found;
 }
 
 // HTML を左から順に読み進めるための走査用パターン。
@@ -85,9 +118,13 @@ const HTML_SCAN_RE =
 // 値は "..." / '...' / 引用符なし のいずれにも対応する
 const ATTR_RE = /([^\s=/>]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/g;
 
-// CSP の meta タグから content 属性の中身を取り出すパターン（全件を拾うので g 付き）
-const CSP_META_RE =
-  /<meta\s+http-equiv="Content-Security-Policy"\s+content="([^"]*)"/gi;
+// CSP の meta タグを拾うパターン。**script の走査と同じくコメントを先に消費する**。
+// これを怠ると、デバッグのために CSP をコメントアウトしたページが
+// 「CSP が 1 つある」ものとして読まれ、**配信物には CSP が 1 つも無いのに緑**になる
+// （逆に、例として書いたコメント内の meta を実物と数えて「2 個あります」と誤検知もする）。
+// script 側だけコメント対策をして meta 側でしていなかったのは、同じ穴の書き忘れだった
+const CSP_META_SCAN_RE =
+  /<!--[\s\S]*?-->|<meta\s+http-equiv="Content-Security-Policy"\s+content="([^"]*)"/gi;
 
 // インライン script 要素を支配するディレクティブを、優先度の高い順に並べたもの。
 // CSP3 では script 要素は script-src-elem が支配し、あれば script-src は**無視される**。
@@ -108,6 +145,10 @@ const EXECUTABLE_SCRIPT_TYPES = new Set([
   "", // type 属性なし（既定で JavaScript）
   "module", // ES モジュール
   "importmap", // インポートマップ（script-src の対象）
+  "speculationrules", // 投機的読み込みのルール。script-src の対象（だから
+  // 'inline-speculation-rules' というソース式が用意されている）。
+  // 「ブラウザが JS として評価しない」ことと「script-src に支配されない」ことは別で、
+  // 非実行側の一覧へ入れるとハッシュを要求しないまま緑になる
   "text/javascript",
   "application/javascript",
   "text/ecmascript",
@@ -125,7 +166,6 @@ const NON_EXECUTABLE_SCRIPT_TYPES = new Set([
   "application/json", // データ島
   "text/template", // テンプレート置き場
   "text/html", // テンプレート置き場（別表記）
-  "speculationrules", // 投機的読み込みのルール
 ]);
 
 // 見つかった問題を溜める配列（1 件目で打ち切らず、まとめて報告する）
@@ -240,8 +280,8 @@ function collectScripts(html, label) {
  * @returns {string | null} 実効ディレクティブの値（決められなければ null）
  */
 function readEffectiveScriptDirective(html, label) {
-  // CSP の meta タグを全件拾う（正規表現は g 付きなので matchAll で回せる）
-  const metas = [...html.matchAll(CSP_META_RE)];
+  // CSP の meta タグを全件拾う（コメント側が一致した回は捕獲グループが未定義なので落とす）
+  const metas = [...html.matchAll(CSP_META_SCAN_RE)].filter((m) => m[1] !== undefined);
   // meta ごと無ければ検査の前提が崩れているので落とす（fail-closed）
   if (metas.length === 0) {
     problems.push(`${label}: Content-Security-Policy の meta タグが見つかりません。`);
@@ -257,12 +297,27 @@ function readEffectiveScriptDirective(html, label) {
     return null;
   }
 
-  // ディレクティブは ";" 区切りなので分割し、前後の空白を落とす（空要素は捨てる）
-  const directives = metas[0][1].split(";").map((d) => d.trim()).filter(Boolean);
+  // ディレクティブは ";" 区切り。名前と値に分けておく。
+  // 名前を小文字化し、区切りを /\s+/ で切るのが要点。CSP の文法上、ディレクティブ名は
+  // **大文字小文字を区別せず**、名前と値の間の空白は SP に限らない（改行やタブでもよい）。
+  // `d.startsWith(name + " ")` のような判定だと、`Script-Src-Elem` と書かれた場合や、
+  // 長い CSP を読みやすさのために改行した場合に見つけられず、静かに script-src へ
+  // フォールバックしてしまう（＝ script-src-elem を見張るために足した対策が効かない）
+  const directives = metas[0][1]
+    .split(";")
+    .map((d) => d.trim())
+    .filter(Boolean)
+    .map((d) => {
+      // 空白の並びで名前と値に切り分ける
+      const parts = d.split(/\s+/);
+      // 先頭がディレクティブ名（小文字へ揃える）、残りが値のリスト
+      return { name: parts[0].toLowerCase(), values: parts.slice(1), raw: d };
+    });
+
   // 優先度の高い順に、最初に見つかったものが実効ディレクティブになる
   for (const name of SCRIPT_DIRECTIVE_PRIORITY) {
-    // 「値なしの単独指定」と「値付き」の両方を拾う
-    const found = directives.find((d) => d === name || d.startsWith(`${name} `));
+    // 名前が一致するディレクティブを探す
+    const found = directives.find((d) => d.name === name);
     // 見つかったらそれを返す（script-src-elem があれば script-src は見ない）
     if (found) return found;
   }
@@ -304,8 +359,8 @@ async function checkPage(fileName) {
   // 取り出せなければ（理由は readEffectiveScriptDirective が既に記録済み）ここで打ち切る
   if (!scriptSrc) return;
 
-  // script-src に書かれた sha256 トークンをすべて拾う
-  const declared = [...scriptSrc.matchAll(SHA256_TOKEN_RE)].map((m) => m[1]);
+  // 実効ディレクティブに書かれた sha256 トークンをすべて拾う
+  const declared = [...scriptSrc.raw.matchAll(SHA256_TOKEN_RE)].map((m) => m[1]);
   // 実際のインライン script から計算したハッシュをすべて求める
   const actual = inlineBodies.map(sha256Base64);
 
@@ -322,23 +377,33 @@ async function checkPage(fileName) {
       `${fileName}: CSP の sha256 が実行対象のインライン script と一致しません。` +
         " このままだとブラウザが script の実行を拒否し、そのページの JavaScript が動かなくなります。\n" +
         `  実行対象のインライン script: ${inlineBodies.length} 個\n` +
-        `  script-src の sha256 トークン: ${declared.length} 個\n` +
+        `  ${scriptSrc.name} の sha256 トークン: ${declared.length} 個\n` +
         (staleTokens.length > 0
           ? `  対応する script が無いトークン（削除する）:\n${staleTokens.map((t) => `    'sha256-${t}'`).join("\n")}\n`
           : "") +
         (missingTokens.length > 0
           ? `  宣言が足りない script のハッシュ（追加する）:\n${missingTokens.map((t) => `    'sha256-${t}'`).join("\n")}\n`
           : "") +
-        `  対応: ${fileName} の CSP meta 内 script-src の sha256 トークンを上の内容へ合わせてください。`,
+        `  対応: ${fileName} の CSP meta 内 ${scriptSrc.name} の sha256 トークンを上の内容へ合わせてください。`,
     );
   }
 
   // --- 規則 B: script を 1 つも持たないページは 'none'（最小権限）---
-  // インラインも外部も無いのに 'none' でなければ、宣言が実態より緩い
-  if (inlineBodies.length === 0 && externalCount === 0 && !scriptSrc.includes("'none'")) {
+  // インラインも外部も無いのに 'none' でなければ、宣言が実態より緩い。
+  // 値の照合はトークン単位で行う（部分文字列で見ると 'none' を含む別の値に釣られる）
+  if (inlineBodies.length === 0 && externalCount === 0 && !scriptSrc.values.includes("'none'")) {
+    // 直すべき場所は「実効ディレクティブが何だったか」で変わる。
+    // default-src へフォールバックしている場合に「その宣言を 'none' にせよ」と読ませると、
+    // default-src 'none' にされてスタイルも画像もフォントも止まる（緑のまま画面が壊れる）。
+    // その場合は **新しく script-src を足す** よう案内する
+    const remedy =
+      scriptSrc.name === "default-src"
+        ? `script-src 'none' を新しく追加してください（現在は ${scriptSrc.name} にフォールバックしています。` +
+          `${scriptSrc.name} 自体を 'none' にすると画像・スタイル・フォントまで止まります）`
+        : `${scriptSrc.name} を 'none' にしてください`;
     problems.push(
       `${fileName}: script を 1 つも持たないので script-src は 'none' が最小権限です。` +
-        ` 現在の宣言: ${scriptSrc}`,
+        ` 現在の実効ディレクティブ: ${scriptSrc.raw}\n  対応: ${remedy}。`,
     );
   }
 }

@@ -24,7 +24,7 @@
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'sha256-8JN+jXTrBKaqo2mnGrPPLUzyCGWGBZf3Jui1kEDMBTw='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'"
+      content="default-src 'self'; script-src 'self' 'sha256-wCqmmkLzIPDpUgFzeyXz6x/L3WBJC3yUC2No7t4rkbQ='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'"
     />
     <meta name="referrer" content="strict-origin-when-cross-origin" />
 
@@ -2235,14 +2235,26 @@
                 // 「データあり」と誤判定されて中身のないバッジが描かれる。
                 // 書き込み側も __proto__ という key で対応表そのものを壊せなくなる
                 const byKey = Object.create(null);
+                // key を持たず読み飛ばした要素の件数
+                let skippedRepos = 0;
+                // 同じ key が 2 回以上現れた（後勝ちで上書きされた）key の一覧
+                const duplicateKeys = [];
                 repos.forEach(function (r) {
                   // 壊れた要素（null や key を持たないもの）が 1 件混ざっただけで
                   // ここが throw すると、以降の正常な repo が 1 つも登録されない。
-                  // 使える要素だけ拾い、残りは下の skipped で数える
-                  if (r && typeof r.key === "string") byKey[r.key] = r;
+                  // 使える要素だけ拾い、残りは件数だけ数える
+                  if (!r || typeof r.key !== "string") {
+                    skippedRepos += 1; // 使えない要素として数える
+                    return; // この要素は登録しない
+                  }
+                  // 既に同じ key が登録済みなら、これから上書きすることを控えておく。
+                  // 件数の引き算（repos.length - キー数）で代用すると、重複を
+                  // 「key を持たない要素」として誤って報告し、しかも
+                  // **本当の問題（先勝ちの行が黙って別の repo のデータに置き換わる）**を
+                  // 一切知らせないままになる
+                  if (byKey[r.key] !== undefined) duplicateKeys.push(r.key);
+                  byKey[r.key] = r; // キーと repo データを対応表に登録する
                 });
-                // JSON 側で使えなかった（key を持たない）要素の件数
-                const skippedRepos = repos.length - Object.keys(byKey).length;
                 // 対応データが見つからなかったカードのキーを溜める配列（走査後にまとめて 1 回だけ知らせる）
                 const missingKeys = [];
                 // 描画そのものが失敗したカードのキーを溜める配列
@@ -2269,6 +2281,15 @@
                     "[portfolio] data/portfolio.json に key を持たない要素が" +
                       skippedRepos +
                       " 件あり、読み飛ばしました。",
+                  );
+                }
+                // 同じ key が重複していたら知らせる。後勝ちで上書きされるため、
+                // 該当カードには「別の repo の CI・コミット情報」が表示されてしまう
+                if (duplicateKeys.length > 0) {
+                  console.warn(
+                    "[portfolio] data/portfolio.json に重複した key があります" +
+                      "（後に現れた方で上書きされるため、カードに別の repo の情報が出ます）:",
+                    duplicateKeys.join(", "),
                   );
                 }
                 // 描画に失敗したカードがあれば、まとめてもう 1 行残す（個別の原因は上に出ている）

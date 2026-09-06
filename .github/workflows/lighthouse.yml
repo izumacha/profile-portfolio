@@ -24,6 +24,10 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
+          # 依存はロックファイルで固定済みなので、~/.npm を再利用して毎回の
+          # フル取得を避ける（この PR で html-validate ジョブにも npm ci が入り、
+          # lint 1 本のために dev 依存一式を毎回落としていた）
+          cache: npm
 
       - name: Install
         # Use the reproducible, lockfile-driven install (issue #16); the repo

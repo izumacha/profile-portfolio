@@ -24,7 +24,7 @@
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'sha256-bApRAmFXTc0+zPAdiIXHMAJiDFuC0rh1JOW2qebHxRk='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'"
+      content="default-src 'self'; script-src 'self' 'sha256-EuxSgiVoZB5MAcq3FIEaFKKD0cvx39Gl/80Qk94lxqE='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'"
     />
     <meta name="referrer" content="strict-origin-when-cross-origin" />
 
@@ -2230,7 +2230,20 @@
               // 「読み込めませんでした」と報告してしまい、実際は届いているファイルの配信パスを
               // 調べに行かせることになる。原因ごとに違う文言を出す
               try {
-                const repos = (data && data.repos) || []; // repo 配列（無ければ空）
+                // repos は配列であることを**先に確かめる**。`|| []` だけだと
+                // {"repos": {}} のような形で forEach が TypeError になり、外側の catch が
+                // 「内容を反映できませんでした」1 行を出して終わる ——このコミットで足した
+                // missingKeys / duplicateKeys / カード単位の縮退がどれも動かないまま、
+                // いちばん起こりやすい壊れ方だけが opaque なログに戻ってしまう
+                const repos = Array.isArray(data && data.repos) ? data.repos : [];
+                // repos があるのに配列でない場合は、その事実を知らせる（黙って空扱いにしない。§6）
+                if (data && data.repos && !Array.isArray(data.repos)) {
+                  console.error(
+                    "[portfolio] data/portfolio.json の repos が配列ではありません。" +
+                      "バッジは描画されません:",
+                    typeof data.repos,
+                  );
+                }
                 const generatedAt = data && data.generated_at; // 生成日時
                 // key → repo の対応表を作る。
                 // Object.create(null) で「継承した中身を持たない」入れ物にするのが要点。

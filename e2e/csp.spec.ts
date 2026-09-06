@@ -40,10 +40,10 @@ import { test, expect, type Page } from "@playwright/test";
 // Playwright は spec を CJS へ変換して読み込むため import.meta は使えず、__dirname を使う
 const REPO_ROOT = join(__dirname, "..");
 
-// 走査しないディレクトリは .htmlvalidateignore を唯一の源として読む。
+// 走査しない名前は .htmlvalidateignore を唯一の源として読む。
 // CI の html-validate (`**/*.html`) と同じ範囲を見るためで、ここに写しを持つと
 // 「構文検査はされるのに CSP は検査されない」ページが黙って生まれる
-const IGNORED_DIRS = readFileSync(join(REPO_ROOT, ".htmlvalidateignore"), "utf8")
+const IGNORED_NAMES = readFileSync(join(REPO_ROOT, ".htmlvalidateignore"), "utf8")
   .split("\n")
   // コメント行と空行を落とす
   .map((line) => line.trim())
@@ -56,7 +56,11 @@ const IGNORED_DIRS = readFileSync(join(REPO_ROOT, ".htmlvalidateignore"), "utf8"
 // されると **こちらだけが黙って無視して範囲がずれる**（構文検査はされるのに
 // CSP は検査されない、という状態がまさにこの網の防ぎたいもの）。
 // 黙ってずれるより落ちる方が良いので、扱えない書き方を見つけたら fail-closed にする
-const UNSUPPORTED_IGNORE_ENTRIES = IGNORED_DIRS.filter((e) => e.includes("/") || e.includes("*"));
+// 判定は「素の名前 1 つ」に見えるかどうか。`/` `*` に加えて `!`（否定）や `?` `[]`（グロブ）も弾く。
+// とくに `!` は**意味を反転させる**唯一の記法で、`docs/` と `!docs` を並べると
+// html-validate は docs を検査対象へ戻すのにこちらは skip したまま、という
+// 「構文検査はされるのに CSP は検査されない」状態を作れてしまう
+const UNSUPPORTED_IGNORE_ENTRIES = IGNORED_NAMES.filter((e) => /[/*?[\]!]/.test(e));
 
 /**
  * 検査対象のページを **リポジトリの *.html から再帰で導出する**。
@@ -81,7 +85,7 @@ function findPages(dir: string, prefix = ""): string[] {
     // ディレクトリなら、除外対象でない限り 1 つ下も見る
     if (entry.isDirectory()) {
       // 配信されないディレクトリと、隠しディレクトリ (.git 等) は丸ごと飛ばす
-      if (IGNORED_DIRS.includes(entry.name) || entry.name.startsWith(".")) continue;
+      if (IGNORED_NAMES.includes(entry.name) || entry.name.startsWith(".")) continue;
       // 下の階層で見つかったページを足す
       found.push(...findPages(join(dir, entry.name), relative));
       // このエントリの処理は終わり
@@ -89,15 +93,28 @@ function findPages(dir: string, prefix = ""): string[] {
     }
     // 拡張子が .html でなければ対象外
     if (!entry.name.toLowerCase().endsWith(".html")) continue;
+    // 除外指定はファイル名にも効かせる。ディレクトリ名にしか適用しないと、
+    // `legacy.html` のような 1 ファイルの除外を html-validate だけが尊重し、
+    // こちらは開きに行って「CSP が無い」と赤くする（対象外と宣言したファイルなのに）
+    if (IGNORED_NAMES.includes(entry.name)) continue;
     // **実体が通常のファイルであること**まで確かめる。`zzz.html` という名前のディレクトリが
     // あると、それを開いた 404 応答には CSP が無いので「違反ゼロ」で緑になってしまう。
     // entry.isFile() だけで見るとシンボリックリンクが false になり、
     // 配信はされるのに検査対象から黙って落ちるので、statSync で実体をたどる
-    if (statSync(join(dir, entry.name)).isFile()) found.push(relative);
+    // throwIfNoEntry: false を付けるのは、**壊れたシンボリックリンク**で statSync が
+    // 例外を投げ、PAGES の計算（module 評価時）ごと落ちるのを避けるため。
+    // そうなると「導出が壊れていない」ガードを含む全テストが 1 つも動かず、
+    // 生の ENOENT だけが出る。リンク切れのファイルは配信もされないので飛ばして正しい
+    const stat = statSync(join(dir, entry.name), { throwIfNoEntry: false });
+    if (stat?.isFile()) found.push(relative);
   }
   // 見つかったページのパスを返す
   return found;
 }
+
+// load 後の通信が落ち着くのを待つ上限（ミリ秒）。
+// 外部フォントが遅い環境でも、ここで待ち続けないようにするための頭打ち
+const SETTLE_TIMEOUT_MS = 3000;
 
 // 検査対象のページ一覧
 const PAGES: ReadonlyArray<string> = findPages(REPO_ROOT);
@@ -142,10 +159,22 @@ async function observePage(page: Page, path: string): Promise<PageObservation> {
     });
   });
 
-  // 対象ページを開く。networkidle まで待って、読み込み中に起きた違反を拾えるようにする
-  const response = await page.goto(path, { waitUntil: "networkidle" });
+  // 対象ページを開く。**networkidle は使わない**。
+  // このリポジトリのページは Google Fonts を読むため、networkidle まで待つと
+  // 第三者ドメインへの往復を毎回待つことになり（実測 index.html で 13 秒、
+  // resume.html の 0.6 秒との差はほぼこれ）、その経路が詰まると CSP と無関係な
+  // 理由で CI が赤くなる。他の spec も既定の "load" を使っている。
+  const response = await page.goto(path, { waitUntil: "load" });
   // 200 以外はページが存在しない (404 の本文には CSP が無いので「違反ゼロ」で緑になってしまう)
   expect(response?.status(), `${path} が ${response?.status()} を返した`).toBe(200);
+
+  // load 後に走る同一オリジンの通信（DOMContentLoaded の fetch("data/portfolio.json")）が
+  // 落ち着くのを待つ。上限を付けるのは、外部フォントが遅い環境で待ち続けないため。
+  // 時間切れは異常ではない（待つ価値のある通信は既に終わっている）ので、
+  // 例外にせず先へ進む —— 握り潰しではなく「上限付きの待ち」であることを明示する
+  await page.waitForLoadState("networkidle", { timeout: SETTLE_TIMEOUT_MS }).catch(() => {
+    // 時間切れ。外部リソースが残っているだけなので、このまま観測へ進む
+  });
 
   // ページの状態を 1 回の評価でまとめて取り出す
   return page.evaluate(() => ({
@@ -160,11 +189,17 @@ async function observePage(page: Page, path: string): Promise<PageObservation> {
       document.head
         .querySelector<HTMLMetaElement>('meta[http-equiv="Content-Security-Policy" i]')
         ?.getAttribute("content") ?? null,
-    // ブラウザが JavaScript として扱うインライン script の数。
-    // src 無し・type 無し（＝既定の JavaScript）だけを数える。
-    // このリポジトリの実行対象インライン script はこの形だけで、
-    // 構造化データ (application/ld+json) は type を持つので数に入らない
-    inlineScriptCount: document.querySelectorAll("script:not([src]):not([type])").length,
+    // ブラウザが JavaScript として実行するインライン script の数。
+    // `:not([type])` だけで絞ると **type="module" や type="text/javascript" まで
+    // 数から外れる**。そうなると「インライン script があるなら sha256 が要る」の
+    // 検査が黙って無効になり、sha256 を meta の nonce（公開されるので無意味）へ
+    // 置き換えても全部緑になる。type を解決して判定する
+    inlineScriptCount: [...document.querySelectorAll("script:not([src])")].filter((el) => {
+      // type 属性を小文字・前後空白なしへ揃える（属性が無ければ空文字＝既定の JavaScript）
+      const type = (el as HTMLScriptElement).type.trim().toLowerCase();
+      // 空 / module / JavaScript の MIME だけが「実行される」
+      return type === "" || type === "module" || /^(text|application)\/(x-)?(java|ecma)script$/.test(type);
+    }).length,
   }));
 }
 

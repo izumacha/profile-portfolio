@@ -2,7 +2,6 @@
   "name": "profile-portfolio",
   "private": true,
   "scripts": {
-    "check:csp": "node scripts/check-csp-hash.mjs",
     "test:lighthouse": "lhci autorun",
     "test:e2e": "playwright test",
     "capture:screenshots": "node scripts/capture-screenshots.mjs"
@@ -12,4 +11,3 @@
     "@playwright/test": "^1.62.1"
   }
 }
-

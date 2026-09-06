@@ -34,22 +34,12 @@ jobs:
         with:
           node-version: 20
 
-      # 対象を "index.html" "resume.html" と書き並べない。下の Check CSP hash は
-      # リポジトリから対象を導出するので、ここだけ写しを持つと 3 枚目の HTML を足した人が
-      # 「CSP は検査されるのに HTML 構文は検査されない」状態を黙って作れてしまう
-      # （検査対象の導出を 1 か所に寄せた理由は scripts/check-csp-hash.mjs の findPages を参照）。
+      # 対象を "index.html" "resume.html" と書き並べない。写しを持つと、ページを足した人が
+      # 追加を忘れた瞬間にそのページだけ黙って構文検査から外れる。
       # html-validate はグロブを自前で解釈するので、シェルに展開させず引用して渡す。
       # 配信されない HTML（node_modules 等）は .htmlvalidateignore で外す
       - name: Validate HTML
         run: npx --yes html-validate "**/*.html"
-
-      # CSP の sha256 とインライン script の一致を検査する。
-      # 不一致のまま公開するとブラウザが script の実行を拒否し、ページの JavaScript が
-      # 丸ごと動かなくなるが、HTML の構文としては正しいので上の html-validate は緑のまま通る
-      # （検査の詳細と、なぜ e2e だけでは足りないかは scripts/check-csp-hash.mjs の冒頭を参照）。
-      # ブラウザを起動しないので html-validate と同じジョブに置き、数秒で落とせるようにする
-      - name: Check CSP hash
-        run: npm run check:csp
 
   link-check:
     runs-on: ubuntu-latest

@@ -1,8 +1,12 @@
-# 生成物ディレクトリ。**html-validate は .gitignore を読まないので、ここへ足すものは
-# .htmlvalidateignore にも書くこと**（CI は `npx html-validate "**/*.html"` で全 HTML を
-# 検査し、e2e/csp.spec.ts も同じ除外指定から対象ページを導出する）。片方だけだと、
-# 新規チェックアウトで生成物が存在しない CI は緑のまま、手元だけが赤くなる。
-# 足し忘れは e2e/csp.spec.ts の「検査対象の導出が壊れていない」が機械的に落とす。
+# 生成物。**html-validate は .gitignore を読まないので、HTML を含みうる生成物
+# ディレクトリをここへ足すときは .htmlvalidateignore にも書くこと**（CI は
+# `npx html-validate "**/*.{html,htm}"` で全 HTML を検査し、e2e/csp.spec.ts も同じ除外指定から
+# 対象ページを導出する）。片方だけだと、新規チェックアウトで生成物が存在しない CI は
+# 緑のまま、手元だけが赤くなる。
+# **機械的に落ちるのはそのディレクトリが実際に HTML を含むときだけ** ——
+# e2e/csp.spec.ts の「検査対象の導出が壊れていない」は `*.html` / `*.htm` しか見ないため、
+# HTML を含まない生成物（下の untracked-snapshot-files.txt など）の書き忘れは検出されない。
+# そちらは html-validate の対象にもならないので、書き分けなくて問題ない。
 .lighthouseci/
 node_modules/
 playwright-report/

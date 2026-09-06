@@ -5,6 +5,16 @@
 # そのページだけ黙って構文検査から外れるため（同じ理由で e2e/csp.spec.ts も
 # 対象ページをリポジトリルートから導出している）。
 # その代わり、配信されない HTML はここで明示的に外す。
+#
+# **このファイルが唯一の除外指定。** 以前 .htmlvalidate.json に
+# `transform: {"^node_modules/": "off"}` があり二重の除外に見えたが、transform は
+# 「変換器を使わない」の指定で検査対象からは外さない（消して実測すると node_modules 配下の
+# HTML が検査され exit 1 になる）。紛らわしいので同じコミットで削除した。この 1 行を
+# 消すと node_modules 配下の HTML 17 枚が検査され、CI（npm ci を走らせる）も落ちる。
+#
+# **下の生成物ディレクトリは .gitignore にも書いてある（html-validate は .gitignore を
+# 読まないため）。生成物ディレクトリを足すときは両方に書くこと。** 片方だけだと、
+# 新規チェックアウトで生成物が無い CI は緑のまま、手元だけが赤くなる。
 node_modules/
 test-results/
 test-results-recheck/

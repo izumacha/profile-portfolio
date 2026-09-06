@@ -1,3 +1,7 @@
+# 生成物ディレクトリ。**html-validate は .gitignore を読まないので、ここへ足すものは
+# .htmlvalidateignore にも書くこと**（CI は `npx html-validate "**/*.html"` で全 HTML を
+# 検査し、e2e/csp.spec.ts も同じ一覧から対象ページを導出する）。片方だけだと、
+# 新規チェックアウトで生成物が存在しない CI は緑のまま、手元だけが赤くなる。
 .lighthouseci/
 node_modules/
 playwright-report/

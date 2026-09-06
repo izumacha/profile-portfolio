@@ -1,9 +1,6 @@
 {
   "extends": ["html-validate:recommended"],
   "elements": ["html5"],
-  "transform": {
-    "^node_modules/": "off"
-  },
   "rules": {
     "void-style": ["error", { "style": "selfclose" }]
   }

@@ -24,7 +24,7 @@
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'sha256-8Ym6SzxKMS718AqxOVTStPyjDV3oawIiLdxaPHucDSo='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'"
+      content="default-src 'self'; script-src 'self' 'sha256-IgSlVLg+beUan9BR6iLQTDG3Bre2cfko7BP1tqxcJ7w='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'"
     />
     <meta name="referrer" content="strict-origin-when-cross-origin" />
 
@@ -2334,7 +2334,11 @@
                 // 対応データの無いカードがあれば、その事実を開発者向けに 1 行だけ残す（§6 握り潰さない）。
                 // 画面は素のカードのままで利用者には何も出さないため、ここで記録しないと
                 // 「バッジが出ないのは意図どおりなのか壊れているのか」を後から切り分けられない
-                if (missingKeys.length > 0) {
+                // **repos がそもそも読めなかったときは出さない。** その場合は全カードが
+                // 必ずここに並ぶが、原因は上で報告済みの「repos が無い／配列でない」であって
+                // カードの綴りではない。最後に読まれるのがこの行になると、正しいマークアップを
+                // 疑わせてしまい、原因を書き分けた上の分岐が半分打ち消される
+                if (reposIsArray && missingKeys.length > 0) {
                   console.warn(
                     "[portfolio] data/portfolio.json に対応データが無いカードがあります" +
                       "（data-repo-key の綴り違い、または収集対象からの漏れ）:",

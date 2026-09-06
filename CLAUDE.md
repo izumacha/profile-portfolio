@@ -50,7 +50,11 @@ GIF 化に `ffmpeg` を使うため事前にインストールしておく。ブ
 | `index.html` | メインポートフォリオページ（ダークテーマ） |
 | `resume.html` | 履歴書ページ（ライトテーマ、印刷対応） |
 | `avatar.jpg` | プロフィール画像 |
+| `favicon.svg` | ファビコン（両ページから参照） |
 | `*.pdf` | 資格証明書 |
+| `data/portfolio.json` | 各プロジェクトの CI 結果・最終コミット・言語の焼き込みデータ。`index.html` の「Live self-proof」バッジがこれを fetch する（**自動生成物**。`.github/workflows/update-portfolio-data.yml` が更新する） |
+| `e2e/sections.spec.ts` | セクション表示・ナビゲーションの E2E（§2 の `npm run test:e2e`） |
+| `e2e/visual.spec.ts` | ビジュアルリグレッション（スナップショット比較） |
 | `scripts/capture-screenshots.mjs` | README 掲載用スクショ・デモ GIF の自動撮影スクリプト（§15） |
 | `scripts/lib/scroll-priming.mjs` | スクロール連動アニメーションを事前発火させる共有ヘルパー（撮影と E2E で共用） |
 | `scripts/lib/static-server.mjs` | 撮影時に `data/portfolio.json` を fetch できるようにするローカル静的サーバー |

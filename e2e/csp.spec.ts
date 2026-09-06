@@ -62,6 +62,26 @@ const IGNORED_NAMES = readFileSync(join(REPO_ROOT, ".htmlvalidateignore"), "utf8
 // 「構文検査はされるのに CSP は検査されない」状態を作れてしまう
 const UNSUPPORTED_IGNORE_ENTRIES = IGNORED_NAMES.filter((e) => /[/*?[\]!]/.test(e));
 
+// .gitignore に書かれた「隠しでないディレクトリ」の一覧。
+// html-validate は .gitignore を読まないので生成物の一覧は 2 か所に要る ——
+// このファイルが対象ページの一覧を持たない理由（写しは必ず片方が古くなる）と同じ問題が、
+// ここだけは統合できずに残る。**せめて片方への足し忘れは機械的に落とす**（下のガード）。
+// 隠しディレクトリ (.lighthouseci/ 等) を対象外にするのは、findPages も
+// html-validate の `**\/*.html` も dotfile を最初から見ないため、
+// .htmlvalidateignore へ書く必要が無いから（要求すると実行不能な指示になる）
+const GITIGNORED_DIRS = readFileSync(join(REPO_ROOT, ".gitignore"), "utf8")
+  .split("\n")
+  // コメント行と空行を落とす
+  .map((line) => line.trim())
+  .filter((line) => line && !line.startsWith("#"))
+  // 末尾が / のもの＝ディレクトリ指定だけを残し、隠しディレクトリは除く
+  .filter((line) => line.endsWith("/") && !line.startsWith("."))
+  // 末尾の / を外して名前にそろえる
+  .map((line) => line.replace(/\/$/, ""));
+
+// .gitignore にあるのに .htmlvalidateignore に無いディレクトリ（＝足し忘れ）
+const UNIGNORED_BUILD_DIRS = GITIGNORED_DIRS.filter((d) => !IGNORED_NAMES.includes(d));
+
 /**
  * 検査対象のページを **リポジトリの *.html から再帰で導出する**。
  *
@@ -166,16 +186,23 @@ async function observePage(page: Page, path: string): Promise<PageObservation> {
     });
   });
 
-  // 対象ページを開く。**"load" でも "networkidle" でもなく "domcontentloaded"**。
-  // index.html は Google Fonts の stylesheet を <link> で読んでおり、
-  // "load" は stylesheet の取得まで待つため、第三者ドメインへの往復が
-  // そのまま待ち時間になる（実測 index.html 13 秒に対し、フォントを読まない
-  // resume.html は 0.6 秒）。しかもその待ちは goto の既定タイムアウト（30 秒）に
-  // 支配され、下の SETTLE_TIMEOUT_MS では頭打ちにできない ——
-  // フォントの配信が詰まると CSP と無関係な理由で赤くなる。
-  // インライン script の拒否は**解析中**に起きるので domcontentloaded より前に
-  // 観測でき、その後の同一オリジン通信は下の上限付きの待ちで拾う
-  const response = await page.goto(path, { waitUntil: "domcontentloaded" });
+  // 対象ページを開く。waitUntil は既定の "load"。
+  //
+  // **"domcontentloaded" にしても速くならない（実測済み。試して戻した）。**
+  // index.html は <head> で Google Fonts の stylesheet を読んでおり、これは
+  // パーサをブロックする。body 末尾のインライン script は保留中の stylesheet を
+  // 待ってからでないと実行できず、DOMContentLoaded はその script を待つ ——
+  // つまり DOMContentLoaded 自体が stylesheet の取得後にしか発火しない。
+  // 実測: load 12,824ms / domcontentloaded 12,610ms（差はほぼ無い）/
+  // commit 9ms / fonts.googleapis.com を止めた domcontentloaded 24ms。
+  // 速くしたいなら第三者フォントを止めるしかないが、それをすると
+  // **style-src の fonts.googleapis.com が一度も試されなくなる**（許可を外しても緑）。
+  // 待ち時間と引き換えに得ているのはその検査なので、"load" のまま待つ。
+  //
+  // 代償: フォント配信が 30 秒（goto の既定タイムアウト）以上詰まると、CSP と
+  // 無関係な理由で赤くなる。これは**誤って赤くなる側**なのでこの検査の方針上は許容する
+  // （緑のまま見逃す側に倒すよりよい。CI は retries: 2 で一過性のものは吸収される）
+  const response = await page.goto(path);
   // 200 以外はページが存在しない (404 の本文には CSP が無いので「違反ゼロ」で緑になってしまう)
   expect(response?.status(), `${path} が ${response?.status()} を返した`).toBe(200);
 
@@ -191,19 +218,23 @@ async function observePage(page: Page, path: string): Promise<PageObservation> {
   // 「違反ゼロ」で確実に見えるのは *解析中に起きる違反*（インライン script の拒否・
   // 静的に書かれた <script src> / <link> の拒否）と、SETTLE_TIMEOUT_MS 内に終わる
   // 同一オリジンの通信（fetch("data/portfolio.json")）まで。
-  // **CSS が二次的に要求するリソース——具体的には Google Fonts の webfont——は
-  // 上限内に間に合わないことがあり、その font-src 違反はここでは観測できない。**
-  // fonts.googleapis.com の stylesheet を取得してから初めて font ファイルを要求するため、
-  // 第三者ドメインへの往復が 2 回積み上がる（実測でこのページの load は約 13 秒）。
+  // **CSS が二次的に要求するリソース——具体的には Google Fonts の webfont——の
+  // font-src 違反はここでは観測できない（推測ではなく実測）。**
+  // font-src を 'none' にした index.html でこのスペックを流すと 3 件とも緑で通る。
+  // fonts.googleapis.com の stylesheet を取得してから初めて font ファイルを要求するため
+  // 第三者ドメインへの往復が 2 回積み上がり、上限内に終わらないことがあるため。
   // 上限を伸ばして待てば見えるが、CSP と無関係なネットワーク事情でテストが遅く・
   // 不安定になり、しかも「十分待てたか」は環境依存なので確実にはならない。
   //
-  // この穴は **e2e/visual.spec.ts が決定的に塞いでいる**。
-  // 同スペックは waitUntil の既定（"load"）でページを開き、全面スクロールののち
-  // toHaveScreenshot で全ページを比較する。font-src が壊れて webfont がブロックされると
-  // 代替フォントで描画され字形も行送りも変わるので、スナップショット比較が必ず落ちる
-  // （1px の高さ差でも落ちる精度がある）。**visual.spec.ts はこの役割も担っているので、
-  // 「見た目の回帰テストだから」と軽く消したり許容差を広げたりしないこと。**
+  // この穴は **e2e/visual.spec.ts が塞いでいる**。同スペックは全ページを
+  // toHaveScreenshot で比較する。webfont がブロックされると代替フォントで描画され、
+  // **実測でページの 7.2% のピクセルが変わる**（fonts.gstatic.com を止めて撮った
+  // 全画面と正常時の全画面を比較した値）。playwright.config.ts の許容差は
+  // maxDiffPixelRatio: 0.02（2%）なので 3.6 倍の余裕で落ちる。
+  // なお**ページの高さは変わらない**ので、サイズ不一致による即失敗は当てにできない。
+  // **したがってこの穴を塞いでいるのは許容差 2% という設定そのものである。**
+  // visual.spec.ts を消す・許容差を 7% 超へ広げる のどちらも、font-src の
+  // 検出を道連れにする（「見た目の回帰テストだから」と軽く触らないこと）。
 
   // ページの状態を 1 回の評価でまとめて取り出す
   return page.evaluate(() => ({
@@ -266,6 +297,15 @@ test.describe("Content-Security-Policy", () => {
       UNSUPPORTED_IGNORE_ENTRIES,
       ".htmlvalidateignore に、e2e/csp.spec.ts の導出が扱えない書き方があります" +
         "（対応しているのは単一のディレクトリ名だけ）。findPages を拡張するか、書き方を単純にしてください",
+    ).toEqual([]);
+    // .gitignore の生成物ディレクトリが .htmlvalidateignore にも載っていること。
+    // 片方だけに足すと、生成物が存在しない CI（新規チェックアウト）は緑のまま、
+    // 生成物のある手元でだけ「第三者の HTML に CSP が無い」と赤くなる ——
+    // CI と手元が食い違う、いちばん原因を追いにくい形になる
+    expect(
+      UNIGNORED_BUILD_DIRS,
+      ".gitignore にあるディレクトリが .htmlvalidateignore に載っていません。" +
+        "html-validate は .gitignore を読まないので、生成物ディレクトリは両方に書いてください",
     ).toEqual([]);
   });
 

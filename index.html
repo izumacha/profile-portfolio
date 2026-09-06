@@ -24,7 +24,7 @@
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'sha256-PexV5wqT4I2aHph2uzP5Dzjf8y9A+rlkHoi7GUrJ548='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'"
+      content="default-src 'self'; script-src 'self' 'sha256-WSt2x+OPsLThW2E6DrlLbOwhJ161UnFCzgdTrkcTA34='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'"
     />
     <meta name="referrer" content="strict-origin-when-cross-origin" />
 
@@ -2228,14 +2228,38 @@
               repos.forEach(function (r) {
                 byKey[r.key] = r; // キーと repo データを対応表に登録する
               });
+              // 対応データが見つからなかったカードのキーを溜める配列（走査後にまとめて 1 回だけ知らせる）
+              const missingKeys = [];
               // data-repo-key を持つ各カードへ描画する
               document.querySelectorAll(".work-card[data-repo-key]").forEach(function (card) {
                 const key = card.getAttribute("data-repo-key"); // 対応キーを取得
+                // JSON 側に同じキーの repo が無いカードを記録する（描画自体は下の renderCard が
+                // 素のカードのままにする。キーの綴り違いや収集対象からの漏れがここに現れる）
+                if (!byKey[key]) missingKeys.push(key);
                 renderCard(card, byKey[key], generatedAt); // 該当データで描画
               });
+              // 対応データの無いカードがあれば、その事実を開発者向けに 1 行だけ残す（§6 握り潰さない）。
+              // 画面は素のカードのままで利用者には何も出さないため、ここで記録しないと
+              // 「バッジが出ないのは意図どおりなのか壊れているのか」を後から切り分けられない
+              if (missingKeys.length > 0) {
+                console.warn(
+                  "[portfolio] data/portfolio.json に対応データが無いカードがあります" +
+                    "（data-repo-key の綴り違い、または収集対象からの漏れ）:",
+                  missingKeys.join(", "),
+                );
+              }
             })
-            .catch(function () {
-              // 取得失敗・JSON 不正時は何もしない＝素のカード表示にフォールバック
+            .catch(function (err) {
+              // 取得失敗・JSON 不正時は素のカード表示へ縮退する（fail-safe）。ただし黙って捨てない（§6）。
+              // ここが空の catch だった頃は、data/portfolio.json の 404（配信パスのずれ）や
+              // update-portfolio-data.yml が壊れた JSON を書いた場合でも、CI/コミット/言語バッジが
+              // 手がかりゼロで消えるだけで、意図した表示と区別が付かなかった。
+              // console.error は開発者向けの出力で、閲覧者の画面には何も出さない（§9 内部詳細を出さない）
+              console.error(
+                "[portfolio] data/portfolio.json を読み込めませんでした。" +
+                  "プロジェクトカードの CI・最終コミット・言語バッジは表示されません:",
+                err,
+              );
             });
         }
 

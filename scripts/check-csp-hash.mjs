@@ -37,7 +37,7 @@
 // SHA-256 を計算するための Node 標準モジュール
 import { createHash } from "node:crypto";
 // HTML ファイルを読むための Node 標準モジュール（Promise 版）
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 // このファイルの位置からリポジトリのルートを求めるために使う
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -45,8 +45,22 @@ import { fileURLToPath } from "node:url";
 // このスクリプトが置かれている scripts/ の 1 つ上＝リポジトリのルート
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
-// 検査対象のページ。増えたらここへ足すだけで同じ規則が掛かる
-const PAGES = ["index.html", "resume.html"];
+/**
+ * 検査対象のページを **リポジトリルートの *.html から導出する**。
+ *
+ * 一覧を手で書き並べない理由は、この検査自身が塞いだ fail-open とまったく同じ。
+ * 写しを持つと、3 枚目の HTML を足した人が一覧への追加を忘れた瞬間、
+ * そのページだけ**黙って**検査対象から外れる（緑のまま通る）。
+ * ルートを読んで拾えば、追加漏れという状態がそもそも作れない。
+ *
+ * @returns {Promise<string[]>} ルート直下の HTML ファイル名（名前順）
+ */
+async function findPages() {
+  // ルート直下のファイル・ディレクトリ名を読み取る
+  const entries = await readdir(REPO_ROOT);
+  // 拡張子が .html のものだけを名前順に採る
+  return entries.filter((name) => name.toLowerCase().endsWith(".html")).sort();
+}
 
 // HTML を左から順に読み進めるための走査用パターン。
 // **コメントと script を 1 本の交替（|）にまとめている**のが要点。正規表現の交替は
@@ -59,16 +73,28 @@ const PAGES = ["index.html", "resume.html"];
 // 本来正しいページに対して「ハッシュが不一致」と報告したうえ、
 // **貼り替えると CI が緑になるのにブラウザは script を拒否し続ける**間違った値を出していた
 // （このリポジトリの resume.html は実際に `NO <script>` と書いたコメントを持っている）。
+// 属性部分を `(?:"[^"]*"|'[^']*'|[^>"'])*` で書くのは、**引用符の中の `>` を
+// タグの終わりと誤認しない**ため。`[^>]*` だと `<script onerror="if(a>b)f()">` を
+// 最初の `>` で切ってしまい、`b">console.log(2)` のような誤った本文をハッシュして
+// 「追加する値」として提示する ——貼り替えると検査だけ緑になり、ブラウザは拒否し続ける
+// （上のコメントが塞いだ壊れ方が別経路で復活する）。
 const HTML_SCAN_RE =
-  /<!--[\s\S]*?-->|<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi;
+  /<!--[\s\S]*?-->|<script\b((?:"[^"]*"|'[^']*'|[^>"'])*)>([\s\S]*?)<\/script\s*>/gi;
 
 // 開始タグの属性文字列から「名前」と「値」を 1 組ずつ取り出すパターン。
 // 値は "..." / '...' / 引用符なし のいずれにも対応する
 const ATTR_RE = /([^\s=/>]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/g;
 
-// CSP の meta タグから content 属性の中身を取り出すパターン
+// CSP の meta タグから content 属性の中身を取り出すパターン（全件を拾うので g 付き）
 const CSP_META_RE =
-  /<meta\s+http-equiv="Content-Security-Policy"\s+content="([^"]*)"/i;
+  /<meta\s+http-equiv="Content-Security-Policy"\s+content="([^"]*)"/gi;
+
+// インライン script 要素を支配するディレクティブを、優先度の高い順に並べたもの。
+// CSP3 では script 要素は script-src-elem が支配し、あれば script-src は**無視される**。
+// どちらも無ければ default-src へフォールバックする。
+// script-src だけを見ていた頃は、`script-src-elem 'self'`（sha256 なし）を足すだけで
+// 検査が緑のままブラウザがインライン script を拒否する fail-open があった
+const SCRIPT_DIRECTIVE_PRIORITY = ["script-src-elem", "script-src", "default-src"];
 
 // script-src ディレクティブに書かれた sha256 トークンを拾うパターン
 const SHA256_TOKEN_RE = /'sha256-([A-Za-z0-9+/=]+)'/g;
@@ -129,17 +155,20 @@ function parseAttributes(attrText) {
  * 文字列の SHA-256 を CSP のトークン形式（base64）で返す。
  *
  * ブラウザは「script 開始タグと終了タグの間の文字列」を UTF-8 のバイト列としてハッシュする。
- * 改行を LF へ正規化してから計算するのは、GitHub Pages が配信するのは **コミットされた
- * blob**（.gitattributes により LF）だから。Windows で `core.autocrlf=true` のまま
- * チェックアウトすると作業ツリーは CRLF になり、正規化しないと未編集のファイルに対して
- * 「不一致」と報告し、しかも **貼り替えると配信中のサイトが壊れる** 値を出してしまう（§10）。
+ * ここでは **正規化を一切しない**（受け取った文字列をそのまま計算する）。
+ *
+ * 改行の扱いは呼び出し側の CR 検査に任せる。この関数で CRLF を LF へ潰すと、
+ * .gitattributes が外れる・対象外の拡張子へ移すなどで **blob が本当に CRLF だった**
+ * 場合に「配信物は CRLF なのに LF 基準で一致と報告する」＝壊れているのに緑、という
+ * 逆向きの fail-open になる（§10）。落とす側に倒しておけば .gitattributes の
+ * 効き目そのものも機械的に確かめられる。
  *
  * @param {string} text ハッシュ対象の script 本文
  * @returns {string} base64 エンコードした SHA-256 値
  */
 function sha256Base64(text) {
-  // 改行コードを LF へ揃えてから、UTF-8 のバイト列としてダイジェストを取る
-  return createHash("sha256").update(text.replace(/\r\n/g, "\n"), "utf8").digest("base64");
+  // 受け取った文字列を UTF-8 のバイト列としてそのままダイジェストを取る
+  return createHash("sha256").update(text, "utf8").digest("base64");
 }
 
 /**
@@ -195,31 +224,54 @@ function collectScripts(html, label) {
 }
 
 /**
- * HTML から CSP の script-src ディレクティブを取り出す。
+ * HTML から「インライン script 要素を実際に支配するディレクティブ」を取り出す。
+ *
+ * script-src だけを見てはいけない。CSP3 では script 要素は script-src-elem が支配し、
+ * それがあるときは script-src は**無視される**。つまり `script-src-elem 'self'` を
+ * 足すだけで、sha256 を並べた script-src は効かなくなる。
+ *
+ * また CSP の meta が複数あるとブラウザは**すべてのポリシーを重ねて**強制する
+ * （通るのは全ポリシーが許可したものだけ）。1 つ目だけ読むと、2 つ目で
+ * `script-src 'none'` を足された場合に見落とす。積集合の再現までは踏み込まず、
+ * 複数あった時点で落とす（fail-closed。このリポジトリは 1 つしか持たない）。
  *
  * @param {string} html 対象ファイルの中身
  * @param {string} label エラーメッセージに出すファイル名
- * @returns {string | null} script-src の値（見つからなければ null）
+ * @returns {string | null} 実効ディレクティブの値（決められなければ null）
  */
-function readScriptSrc(html, label) {
-  // CSP の meta タグを探す
-  const meta = CSP_META_RE.exec(html);
+function readEffectiveScriptDirective(html, label) {
+  // CSP の meta タグを全件拾う（正規表現は g 付きなので matchAll で回せる）
+  const metas = [...html.matchAll(CSP_META_RE)];
   // meta ごと無ければ検査の前提が崩れているので落とす（fail-closed）
-  if (!meta) {
+  if (metas.length === 0) {
     problems.push(`${label}: Content-Security-Policy の meta タグが見つかりません。`);
     return null;
   }
-  // ディレクティブは ";" 区切りなので分割し、前後の空白を落とす
-  const directives = meta[1].split(";").map((d) => d.trim());
-  // "script-src" のディレクティブを探す（値なしの "script-src" 単独も拾えるようにする）
-  const scriptSrc = directives.find((d) => d === "script-src" || d.startsWith("script-src "));
-  // script-src が無いと default-src へフォールバックする挙動になり、意図が読めないので落とす
-  if (!scriptSrc) {
-    problems.push(`${label}: CSP に script-src ディレクティブがありません。`);
+  // 複数あるとポリシーが重なり、この検査の前提（1 つの script-src を見れば足りる）が崩れる
+  if (metas.length > 1) {
+    problems.push(
+      `${label}: Content-Security-Policy の meta タグが ${metas.length} 個あります。` +
+        " ブラウザは全ポリシーを重ねて強制するため、1 つだけを見るこの検査では正しく判定できません。" +
+        " meta を 1 つにまとめるか、scripts/check-csp-hash.mjs を積集合に対応させてください。",
+    );
     return null;
   }
-  // 見つかったディレクティブをそのまま返す
-  return scriptSrc;
+
+  // ディレクティブは ";" 区切りなので分割し、前後の空白を落とす（空要素は捨てる）
+  const directives = metas[0][1].split(";").map((d) => d.trim()).filter(Boolean);
+  // 優先度の高い順に、最初に見つかったものが実効ディレクティブになる
+  for (const name of SCRIPT_DIRECTIVE_PRIORITY) {
+    // 「値なしの単独指定」と「値付き」の両方を拾う
+    const found = directives.find((d) => d === name || d.startsWith(`${name} `));
+    // 見つかったらそれを返す（script-src-elem があれば script-src は見ない）
+    if (found) return found;
+  }
+
+  // 3 つとも無いと script 要素が何に支配されるか決まらないので落とす
+  problems.push(
+    `${label}: CSP に ${SCRIPT_DIRECTIVE_PRIORITY.join(" / ")} のいずれもありません。`,
+  );
+  return null;
 }
 
 /**
@@ -231,11 +283,25 @@ async function checkPage(fileName) {
   // ファイルの中身を UTF-8 で読み込む
   const html = await readFile(join(REPO_ROOT, fileName), "utf8");
 
+  // 改行に CR が混ざっていたら、ハッシュの計算前に落とす（§10）。
+  // 配信されるのはコミット済みの blob なので、作業ツリーが CRLF だとブラウザが
+  // 計算する値とここで計算する値が食い違う。正規化して合わせるのではなく落とすのは、
+  // 「blob が本当に CRLF なのに緑」という逆向きの取りこぼしを作らないため。
+  // .gitattributes の `*.html text eol=lf` が効いていればここには来ない
+  if (html.includes("\r")) {
+    problems.push(
+      `${fileName}: 改行に CR が含まれています（CRLF）。` +
+        " 配信されるのはコミット済みの blob なので、このままだと CSP の sha256 が食い違います。" +
+        " .gitattributes の `*.html text eol=lf` が効いているか確認し、LF で保存し直してください。",
+    );
+    return;
+  }
+
   // script 要素を仕分ける
   const { inlineBodies, externalCount } = collectScripts(html, fileName);
-  // script-src ディレクティブを取り出す
-  const scriptSrc = readScriptSrc(html, fileName);
-  // 取り出せなければ（理由は readScriptSrc が既に記録済み）ここで打ち切る
+  // インライン script を実際に支配するディレクティブを取り出す
+  const scriptSrc = readEffectiveScriptDirective(html, fileName);
+  // 取り出せなければ（理由は readEffectiveScriptDirective が既に記録済み）ここで打ち切る
   if (!scriptSrc) return;
 
   // script-src に書かれた sha256 トークンをすべて拾う
@@ -277,8 +343,18 @@ async function checkPage(fileName) {
   }
 }
 
+// 検査対象のページをリポジトリルートから導出する
+const pages = await findPages();
+
+// 1 枚も見つからないのは前提が崩れている（＝「対象ゼロなので違反ゼロ」で緑になる状態）
+if (pages.length === 0) {
+  console.error("CSP の検査に失敗しました:\n");
+  console.error("- リポジトリルートに HTML ファイルが 1 つも見つかりません。\n");
+  process.exit(1);
+}
+
 // 対象ページを順に検査する
-for (const page of PAGES) {
+for (const page of pages) {
   await checkPage(page);
 }
 
@@ -295,5 +371,5 @@ if (problems.length > 0) {
 // （「CSP OK」とだけ書くと、この検査が見ていない 'unsafe-eval' や許可ホストの追加まで
 //   保証したように読めてしまうため、範囲を明示する）
 console.log(
-  `CSP sha256 OK: ${PAGES.join(" / ")} の script-src の sha256 は、実行対象のインライン script と過不足なく一致しています。`,
+  `CSP sha256 OK: ${pages.join(" / ")} の実効ディレクティブの sha256 は、実行対象のインライン script と過不足なく一致しています。`,
 );

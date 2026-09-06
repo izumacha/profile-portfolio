@@ -24,7 +24,7 @@
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'sha256-GLyZwCDPDRu9pMMbxTtbjCI4OJUGV8N77/vdBGXNPwc='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'"
+      content="default-src 'self'; script-src 'self' 'sha256-8JN+jXTrBKaqo2mnGrPPLUzyCGWGBZf3Jui1kEDMBTw='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'"
     />
     <meta name="referrer" content="strict-origin-when-cross-origin" />
 
@@ -2236,18 +2236,48 @@
                 // 書き込み側も __proto__ という key で対応表そのものを壊せなくなる
                 const byKey = Object.create(null);
                 repos.forEach(function (r) {
-                  byKey[r.key] = r; // キーと repo データを対応表に登録する
+                  // 壊れた要素（null や key を持たないもの）が 1 件混ざっただけで
+                  // ここが throw すると、以降の正常な repo が 1 つも登録されない。
+                  // 使える要素だけ拾い、残りは下の skipped で数える
+                  if (r && typeof r.key === "string") byKey[r.key] = r;
                 });
+                // JSON 側で使えなかった（key を持たない）要素の件数
+                const skippedRepos = repos.length - Object.keys(byKey).length;
                 // 対応データが見つからなかったカードのキーを溜める配列（走査後にまとめて 1 回だけ知らせる）
                 const missingKeys = [];
+                // 描画そのものが失敗したカードのキーを溜める配列
+                const failedKeys = [];
                 // data-repo-key を持つ各カードへ描画する
                 document.querySelectorAll(".work-card[data-repo-key]").forEach(function (card) {
                   const key = card.getAttribute("data-repo-key"); // 対応キーを取得
                   // JSON 側に同じキーの repo が無いカードを記録する（描画自体は下の renderCard が
                   // 素のカードのままにする。キーの綴り違いや収集対象からの漏れがここに現れる）
                   if (!byKey[key]) missingKeys.push(key);
-                  renderCard(card, byKey[key], generatedAt); // 該当データで描画
+                  // 描画は **カード 1 枚ごと** に囲う。ループ全体を 1 つの try で囲うと、
+                  // 1 件の壊れたデータで残り全部のバッジが道連れになって消える
+                  try {
+                    renderCard(card, byKey[key], generatedAt); // 該当データで描画
+                  } catch (cardErr) {
+                    // そのカードだけ素のまま縮退させ、どのカードが落ちたかを記録する
+                    failedKeys.push(key);
+                    console.error("[portfolio] カードのバッジ描画に失敗しました:", key, cardErr);
+                  }
                 });
+                // JSON 側に使えない要素があれば、その件数を知らせる（黙って捨てない。§6）
+                if (skippedRepos > 0) {
+                  console.warn(
+                    "[portfolio] data/portfolio.json に key を持たない要素が" +
+                      skippedRepos +
+                      " 件あり、読み飛ばしました。",
+                  );
+                }
+                // 描画に失敗したカードがあれば、まとめてもう 1 行残す（個別の原因は上に出ている）
+                if (failedKeys.length > 0) {
+                  console.warn(
+                    "[portfolio] バッジを描画できなかったカード:",
+                    failedKeys.join(", "),
+                  );
+                }
                 // 対応データの無いカードがあれば、その事実を開発者向けに 1 行だけ残す（§6 握り潰さない）。
                 // 画面は素のカードのままで利用者には何も出さないため、ここで記録しないと
                 // 「バッジが出ないのは意図どおりなのか壊れているのか」を後から切り分けられない

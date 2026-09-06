@@ -25,7 +25,7 @@ python -m http.server 8000         # ローカルサーバーで配信して確�
 
 ```bash
 npm ci                                          # 依存インストール（決定的）
-npx --yes html-validate "**/*.html"             # HTML 構文チェック（除外は .htmlvalidateignore）
+npx html-validate "**/*.html"                    # HTML 構文チェック（除外は .htmlvalidateignore）
 npx playwright install --with-deps chromium      # 初回のみ: E2E 用ブラウザ
 npm run test:e2e                                 # Playwright（ビジュアルリグレッション + 機能 + CSP 違反）
 npm run test:lighthouse                          # Lighthouse CI（lhci autorun）
@@ -89,7 +89,9 @@ GitHub Pages は HTTP レスポンスヘッダを付けられないため、CSP 
 1. **違反ゼロ** — `securitypolicyviolation` イベントを拾い、ブラウザが実際に何もブロックしないこと。
 2. **方式が保たれていること** — CSP が（`<head>` に）存在して中身が空でなく、script 系ディレクティブに `'unsafe-inline'` / `'unsafe-eval'` が無く、**CSP meta より前に script が置かれておらず**（meta の CSP はそれより後ろしか支配しないため、前に置かれた script は無制限に実行され違反も起きない）、インライン script を持つページには `sha256-` があること。
 
-導出の健全性を見るガード（`検査対象の導出が壊れていない`）も同じファイルにあり、**ページを 1 枚も導出できない** / `.htmlvalidateignore` に導出が解釈できない書き方（`!` 否定など）がある / **git が無視しているページを拾っている** の 3 つで落ちる。
+導出の健全性を見るガード（`検査対象の導出が壊れていない`）も同じファイルにあり、**ページを 1 枚も導出できない** / `.htmlvalidateignore` に導出が解釈できない書き方（`!` 否定など）がある / **git が無視しているページを拾っている**（余計なものを拾った側）/ **git が追跡しているページを拾えていない**（取りこぼした側）の 4 つで落ちる。
+
+**取りこぼし側のガードが要る理由**: 余計なものだけを見ていると、実在のページを `.htmlvalidateignore` へ足すだけで html-validate からも CSP 検査からも外せてしまい、**痕跡はテスト件数が 1 つ減ることだけ**（正当なリファクタと見分けが付かない）。実測で `pages/talks.html` を置いて `pages/` を除外すると、両方とも緑のまま通った。照合には **`git ls-files` という導出とは独立な手がかり**を使う（GitHub Pages が実際に配信する集合そのもので、`.htmlvalidateignore` にも `findPages` の実装にも依存しない）。同じ手がかりでガードを書くと、導出が狭まったときにガードも一緒に狭まって無力化される。
 
 3 つ目は、html-validate が `.gitignore` を読まないため生成物の除外指定が 2 か所に必要になることへの手当て（**生成物ディレクトリを足すときは `.gitignore` と `.htmlvalidateignore` の両方に書く**。片方だけだと、生成物が存在しない CI は緑のまま手元だけが赤くなる）。**判定に gitignore の書式を自前で解釈しない** —— 否定 `!` / グロブ `**/dist/` / 入れ子 `docs/generated/` / ルート固定 `/build/` / 末尾スラッシュの有無 / 名前に含まれるドット `build.v2` と場合分けが尽きず、自前で分類していた版は実際に 5 つの穴（素通り 3・行き止まり 2）を出した。**CSP の文法を正規表現で再実装しようとしたのと同じ altitude の誤り**なので同じ手当てをし、`git check-ignore` に判定させている。
 

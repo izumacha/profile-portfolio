@@ -191,6 +191,35 @@ function gitIgnoredPages(paths: ReadonlyArray<string>): string[] {
 // findPages が拾ったのに git が無視しているページ（＝ .htmlvalidateignore への足し忘れ）
 const GIT_IGNORED_PAGES = gitIgnoredPages(PAGES);
 
+/**
+ * git が追跡している *.html を返す ——**導出とは独立な手がかり**。
+ *
+ * 上のガードは「余計なものを拾っていないか」しか見ておらず、**取りこぼしには無力**だった。
+ * 実測: 実在の `pages/talks.html`（CSP 無し）を置いて `.htmlvalidateignore` へ
+ * `pages/` を足すと、html-validate も exit 0、このスペックも緑のまま通り、
+ * **痕跡はテスト件数が 1 つ減ることだけ**（正当なリファクタと見分けが付かない）。
+ * findPages を将来せばめたとき（拡張子の判定や除外条件をいじったとき）も同じ形になる。
+ *
+ * そこで **findPages とは違う経路**で「あるべき集合」を求めて突き合わせる。
+ * git の追跡対象は GitHub Pages が実際に配信する集合そのもので、
+ * .htmlvalidateignore にも findPages の実装にも依存しない。同じ手がかりで
+ * ガードを書くと、導出が狭まったときにガードも一緒に狭まって無力化される。
+ *
+ * @returns baseURL 起点のページパス（先頭 "/" 付き）
+ */
+function trackedPages(): string[] {
+  // 追跡中の .html を git に列挙させる（-z で改行を含む名前にも耐える）
+  const out = execFileSync("git", ["ls-files", "-z", "--", "*.html", "*.htm"], {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+  });
+  // NUL 区切りを分解し、baseURL 起点の書式へそろえる
+  return out.split("\0").filter(Boolean).map((p) => `/${p}`);
+}
+
+// git が追跡しているのに findPages が拾えなかったページ（＝黙って検査から外れたページ）
+const UNDERIVED_PAGES = trackedPages().filter((p) => !PAGES.includes(p));
+
 // 違反 1 件分の記録 (どのディレクティブが何をブロックしたかを失敗メッセージに出すため)
 interface CspViolation {
   // 破られたディレクティブ (例: "script-src")
@@ -361,6 +390,16 @@ test.describe("Content-Security-Policy", () => {
         "書いてください（そうしないと、このテストも `npx html-validate \"**/*.html\"` も" +
         "手元でだけ赤くなります）",
     ).toEqual([]);
+    // 逆向き ——**取りこぼしていないこと**を、導出とは独立な手がかり（git の追跡対象）で照合する。
+    // これが無いと、実在のページを .htmlvalidateignore で隠すだけで検査から外せてしまい、
+    // 痕跡はテスト件数が 1 つ減ることだけになる（上の関数のコメントに実測を書いた）
+    expect(
+      UNDERIVED_PAGES,
+      "git が追跡している HTML を CSP の検査対象に拾えていません。" +
+        "GitHub Pages はこのファイルを配信するのに、html-validate も CSP 検査も見ていません。" +
+        ".htmlvalidateignore で除外していないか、findPages が拾えない置き方（隠しファイル等）に" +
+        "なっていないかを確認してください",
+    ).toEqual([]);
   });
 
   // 対象ページを 1 枚ずつ検証する。
@@ -405,15 +444,22 @@ test.describe("Content-Security-Policy", () => {
         .not.toBe("");
 
       // script 系ディレクティブだけを取り出す (style-src は 'unsafe-inline' を正当に使うため)。
-      // **`script-src-attr` を書き並べていないが、これも拾える**（`script-src` の直後の
-      // `\b` がハイフンとの境界に当たるため）。インラインのイベントハンドラを解禁する
-      // `script-src-attr 'unsafe-inline'` を足す変異が実際に赤くなることを確認済み。
+      //
+      // **`script-src` と書くだけで `script-src-elem` / `script-src-attr` も拾える。**
+      // 直後の `\b` が「c」と「-」の境界に当たるため。だから**ハイフン付きの変種を
+      // 書き並べない** —— 並べると一覧が網羅的に見え、(a) 抜けている変種を足そうとして
+      // 無意味な行が増えるか、(b) 「網羅すべき一覧」と誤解した人がディレクティブを足す
+      // ついでに `\b` を外し、**ハイフン付きの変種すべてが黙って対象から外れる**
+      // （'unsafe-inline' も 'unsafe-eval' も sha256 も、その変種では見なくなる）。
+      // インラインのイベントハンドラを解禁する `script-src-attr 'unsafe-inline'` を
+      // 足す変異が実際に赤くなることを確認済み。
+      //
       // ここは素朴な文字列処理でよい。取りこぼしても**誤って赤くなるだけ**で、
       // 緑のまま見逃す側には倒れない（自前パーサが危険だったのは逆向きだったから）
       const scriptDirectives = (policy ?? "")
         .split(";")
         .map((d) => d.trim())
-        .filter((d) => /^(script-src|script-src-elem|default-src)\b/i.test(d))
+        .filter((d) => /^(script-src|default-src)\b/i.test(d))
         .join(" ");
 
       // script を支配するディレクティブが 1 つも無ければ、ポリシーは script を制限していない

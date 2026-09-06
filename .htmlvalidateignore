@@ -23,6 +23,10 @@
 # 散文の約束だけに頼らないよう、**e2e/csp.spec.ts の「検査対象の導出が壊れていない」が
 # 機械的に検査している**（検査対象に拾ったページを git が無視していないこと。
 # gitignore の書式は自前で解釈せず `git check-ignore` に判定させている）。
+#
+# **逆向きも見ている**: git が追跡しているページをここで除外すると、html-validate からも
+# CSP 検査からも黙って外れる（痕跡はテスト件数が 1 つ減ることだけ）ので、
+# `git ls-files` と突き合わせて落とす。**実在のページをここへ足さないこと。**
 node_modules/
 test-results/
 test-results-recheck/

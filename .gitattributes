@@ -1,0 +1,23 @@
+# 改行コードを LF に固定する。
+#
+# index.html の CSP は インライン script 本文の base64(SHA-256(...)) を script-src に
+# 書いており、GitHub Pages が配信するのは **コミットされた blob** そのもの。
+# Windows の既定（core.autocrlf=true）でチェックアウトすると作業ツリーが CRLF になり、
+# ローカルで計算したハッシュが配信物のハッシュと食い違う。
+# scripts/check-csp-hash.mjs 側でも LF へ正規化してから計算しているが、
+# そもそも作業ツリーを LF に揃えておけば食い違いの元が 1 つ減る（§10 移植性）。
+*.html text eol=lf
+
+# 検査スクリプト・E2E・設定ファイルも同じ理由で LF に揃える
+*.mjs text eol=lf
+*.ts text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.md text eol=lf
+
+# 画像・PDF はバイナリとして扱い、改行変換を一切行わない
+# （スクリーンショットは Playwright の比較対象なので 1 バイトも変えてはいけない）
+*.png binary
+*.jpg binary
+*.gif binary
+*.pdf binary

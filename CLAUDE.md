@@ -47,7 +47,16 @@ npm run capture:screenshots                      # 静止画 4 枚 + デモ GIF 
 ```
 
 GIF 化に `ffmpeg` を使うため事前にインストールしておく。ブラウザをダウンロードできない環境では
-`CAPTURE_CHROMIUM_EXECUTABLE=/path/to/chromium` で既存の Chromium 実行ファイルを指定できる。
+`PLAYWRIGHT_CHROMIUM_PATH=/path/to/chromium` で既存の Chromium 実行ファイルを指定できる
+（**`npm run test:e2e` にも同じ環境変数が効く**。判定は `scripts/lib/chromium-launch-options.mjs`
+に集約し、撮影スクリプトと `playwright.config.ts` が共有する。片方だけが逃げ道を持つと、
+§2 が言う「CI と同じコマンドをローカルで流す」が E2E だけ実行できない状態になる）。
+**ただし別 build の Chromium を指定した場合、ビジュアルリグレッション
+（`e2e/visual.spec.ts`）だけは落ちうる** — スナップショットは `@playwright/test` が
+ピン留めした build のフォント描画で撮ってあり、build が違うとページ高さごと変わって
+`maxDiffPixelRatio` を超える（実測: 7804px → 7830px、差分比 0.03 対 許容 0.02）。
+機能系・CSP 系は問題なく走るので、**この差分を理由にスナップショットを更新しないこと**
+（CI 側の基準が壊れる）。
 
 ## 3. アーキテクチャ
 
@@ -70,6 +79,7 @@ GIF 化に `ffmpeg` を使うため事前にインストールしておく。ブ
 | `scripts/capture-screenshots.mjs` | README 掲載用スクショ・デモ GIF の自動撮影スクリプト（§15） |
 | `scripts/lib/scroll-priming.mjs` | スクロール連動アニメーションを事前発火させる共有ヘルパー（撮影と E2E で共用） |
 | `scripts/lib/static-server.mjs` | 撮影時に `data/portfolio.json` を fetch できるようにするローカル静的サーバー |
+| `scripts/lib/chromium-launch-options.mjs` | Chromium 実行ファイルの差し替え（`PLAYWRIGHT_CHROMIUM_PATH`）を組み立てる共有ヘルパー（撮影と E2E で共用） |
 | `docs/screenshots/` | README 掲載用のスクリーンショットとデモ GIF（自動生成物） |
 
 ### デザイン規約（§6 の一元管理を具体化）

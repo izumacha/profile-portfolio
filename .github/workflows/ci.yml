@@ -33,14 +33,19 @@ jobs:
       # **Node の major は、ピン留めした検査ツールが宣言する対応範囲に合わせる。**
       # html-validate 11.x の engines は `^22.22.0 || >= 24.8.0` で、CLI のグロブ展開に
       # Node 22 で入った fs.globSync を使う。20 のままだと `npx html-validate "**/*.html"` が
-      # `TypeError: fs.globSync is not a function` で落ちる（実際にこの PR で落ちた）。
+      # `TypeError: fs.globSync is not a function` で落ちる（過去に実際に落ちた）。
       # **npm ci は engines 違反を警告するだけで止めない**ので、インストールは成功し、
       # 実行時になって初めて壊れる。ローカルが 22 以上だと手元では再現せず CI だけが赤くなる。
-      # このリポジトリの他ジョブも同じ package-lock.json を入れるため、major は 4 か所
-      # （このファイルの 2 か所・lighthouse.yml・update-snapshots.yml）で必ずそろえる。
+      #
+      # **版は `.nvmrc`（唯一の正本）から読む。** 以前はこのファイルの 2 か所・
+      # lighthouse.yml・update-snapshots.yml の計 4 か所に `22` を直書きし、
+      # 「必ずそろえる」とコメントで約束していた。写しを 4 つ持つ形は、片方だけ
+      # 書き換えたときに黙ってずれる（同じ package-lock.json を別 major で動かす
+      # ことになり、engines 違反が警告のまま埋もれる）。参照にすれば、そもそも
+      # そろえるべき写しが存在しなくなる。ローカルでも `nvm use` が同じ版を選ぶ。
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22
+          node-version-file: .nvmrc
           # 依存はロックファイルで固定済みなので、~/.npm を再利用して毎回の
           # フル取得を避ける（この PR で html-validate ジョブにも npm ci が入り、
           # lint 1 本のために dev 依存一式を毎回落としていた）
@@ -148,12 +153,12 @@ jobs:
           # 最初に見つかった 1 つで打ち切るため、複数欠けていれば 1 回に 1 つずつ出る
           : "${SNAPSHOT_DIR:?}" "${RECHECK_OUTPUT_DIR:?}" "${UNTRACKED_LIST_FILE:?}"
 
-      # major は html-validate ジョブと同じ 22 にそろえる（理由は同ジョブのコメント）。
-      # 同じ package-lock.json を入れるので、ここだけ古い major に残すと
+      # 版は `.nvmrc` から読む（どの major を選ぶかの理由は html-validate ジョブのコメント）。
+      # 同じ package-lock.json を入れるので、ここだけ別の major になると
       # 「同じ依存を 2 つの major で動かす」ことになり、engines 違反が警告のまま埋もれる
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22
+          node-version-file: .nvmrc
           # 依存はロックファイルで固定済みなので、~/.npm を再利用して毎回の
           # フル取得を避ける（この PR で html-validate ジョブにも npm ci が入り、
           # lint 1 本のために dev 依存一式を毎回落としていた）

@@ -28,6 +28,8 @@ import { fileURLToPath } from "node:url";
 import { startStaticServer } from "./lib/static-server.mjs";
 // スクロール連動アニメーションを事前に発火させる共有ヘルパー（e2e と共用）
 import { primeScrollAnimations } from "./lib/scroll-priming.mjs";
+// Chromium の起動オプション（実行ファイルパスの上書き）を組み立てる共有ヘルパー（e2e と共用）
+import { chromiumLaunchOptions } from "./lib/chromium-launch-options.mjs";
 
 // このスクリプト自身が置かれているディレクトリ（scripts/）
 const scriptDir = dirname(fileURLToPath(import.meta.url));
@@ -65,12 +67,6 @@ const GIF_FRAME_INTERVAL_MS = 125;
 const GIF_WIDTH = 800;
 // GIF の再生フレームレート。撮影間隔（GIF_FRAME_INTERVAL_MS）と揃えて等速再生にする
 const GIF_FRAMERATE = 1000 / GIF_FRAME_INTERVAL_MS;
-
-// 使用する Chromium 実行ファイルを差し替えるための環境変数名。
-// 通常は `npx playwright install chromium` で入る Playwright 同梱の Chromium が使われるが、
-// ブラウザを別途配置済みでダウンロードできない環境（オフラインの CI・コンテナ等）では
-// この環境変数に実行ファイルのパスを渡して既存の Chromium を使い回せるようにする
-const CHROMIUM_EXECUTABLE_ENV = "CAPTURE_CHROMIUM_EXECUTABLE";
 
 /**
  * 外部コマンドを引数配列で起動し、終了を待つ。
@@ -282,10 +278,9 @@ async function main() {
   // 終わらず無応答のままハングしていた（CI ではジョブがタイムアウトするまで気づけない）。
   // ブラウザ起動を try の内側へ移し、失敗時も必ずサーバーを閉じてプロセスが終了できるようにする
   try {
-    // 環境変数で実行ファイルが指定されていればそれを使う（未指定なら Playwright 同梱の Chromium）
-    const executablePath = process.env[CHROMIUM_EXECUTABLE_ENV];
-    // Playwright の Chromium をヘッドレスで起動する
-    const browser = await chromium.launch(executablePath ? { executablePath } : {});
+    // Playwright の Chromium をヘッドレスで起動する。
+    // 実行ファイルパスの上書き判定は共有ヘルパーが持つ（e2e と同じ環境変数で効かせるため）
+    const browser = await chromium.launch(chromiumLaunchOptions());
 
     try {
       // 静止画 4 枚を撮る

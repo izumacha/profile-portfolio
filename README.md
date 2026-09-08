@@ -79,7 +79,7 @@ npm run capture:screenshots                 # docs/screenshots/ を再生成（f
 ```
 
 GIF の生成に `ffmpeg` を使うため、事前にインストールしてください（例: `apt-get install ffmpeg` / `brew install ffmpeg`）。
-ブラウザをダウンロードできない環境では、`CAPTURE_CHROMIUM_EXECUTABLE` に既存の Chromium 実行ファイルのパスを指定すると、そちらを使い回せます。
+ブラウザをダウンロードできない環境では、`PLAYWRIGHT_CHROMIUM_PATH` に既存の Chromium 実行ファイルのパスを指定すると、そちらを使い回せます（`npm run test:e2e` にも同じ環境変数が効きます）。
 
 ## カスタマイズ
 

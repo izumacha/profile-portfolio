@@ -23,6 +23,14 @@ python -m http.server 8000         # ローカルサーバーで配信して確�
 
 検証・テストは CI（`.github/workflows/ci.yml` / `lighthouse.yml`）と同じコマンドをローカルで流す（`package-lock.json` があるので `npm ci` を使う）。
 
+**Node の版は `.nvmrc`（= 22）が唯一の正本。** ローカルは `nvm use`（または `.nvmrc` を読む
+ツール）でそろえる。CI の 4 つの `actions/setup-node` はすべて `node-version-file: .nvmrc` で
+このファイルを読むので、ワークフロー側に版は書かれていない。**22 なのは検査ツールの都合**で、
+`html-validate` 11.x の `engines` が `^22.22.0 || >= 24.8.0` を宣言し、CLI のグロブ展開に
+Node 22 で入った `fs.globSync` を使うため。20 で走らせると `npx html-validate` が
+`TypeError: fs.globSync is not a function` で落ちる（`npm ci` は engines 違反を警告するだけで
+止めないので、インストールは成功して実行時に初めて壊れる）。
+
 ```bash
 npm ci                                          # 依存インストール（決定的）
 npx html-validate "**/*.{html,htm}"               # HTML 構文チェック（除外は .htmlvalidateignore）
@@ -55,6 +63,7 @@ GIF 化に `ffmpeg` を使うため事前にインストールしておく。ブ
 | `data/portfolio.json` | 各プロジェクトの CI 結果・最終コミット・言語の焼き込みデータ。`index.html` の「Live self-proof」バッジがこれを fetch する（**自動生成物**。`.github/workflows/update-portfolio-data.yml` が更新する） |
 | `e2e/sections.spec.ts` | セクション表示・ナビゲーションの E2E（§2 の `npm run test:e2e`） |
 | `e2e/visual.spec.ts` | ビジュアルリグレッション（スナップショット比較） |
+| `.nvmrc` | 検証ツールを動かす Node の major（**唯一の正本**。CI の 4 つの `setup-node` が `node-version-file` で読む。理由は §2） |
 | `.htmlvalidateignore` | html-validate の検査対象から外すパス（配信されない HTML） |
 | `e2e/csp.spec.ts` | CSP 違反が起きないことをブラウザに判定させる E2E（下記） |
 | `.gitattributes` | 改行を LF に固定する（CSP の sha256 が CRLF チェックアウトでずれないようにするため。下記） |

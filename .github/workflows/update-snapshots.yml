@@ -18,11 +18,11 @@ jobs:
       # Actions pinned to commit SHA for supply-chain integrity (issue #16).
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # major は ci.yml の 2 ジョブと同じ 22 にそろえる（理由は ci.yml の html-validate
-      # ジョブのコメント。同じ package-lock.json を入れるので major を割らない）
+      # 版は `.nvmrc`（唯一の正本）から読む（どの major を選ぶかの理由は ci.yml の
+      # html-validate ジョブのコメント。同じ package-lock.json を入れるので major を割らない）
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22
+          node-version-file: .nvmrc
           # 依存はロックファイルで固定済みなので、~/.npm を再利用して毎回の
           # フル取得を避ける（この PR で html-validate ジョブにも npm ci が入り、
           # lint 1 本のために dev 依存一式を毎回落としていた）

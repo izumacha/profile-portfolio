@@ -36,6 +36,8 @@ import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { test, expect, type Page } from "@playwright/test";
+// 追跡中ページの列挙は visual.spec.ts と共有する（写しを持たない。CLAUDE.md §6 DRY）
+import { trackedPages } from "./lib/tracked-pages";
 
 // このファイル (e2e/) の 1 つ上＝リポジトリのルート。
 // Playwright は spec を CJS へ変換して読み込むため import.meta は使えず、__dirname を使う
@@ -213,15 +215,7 @@ const GIT_IGNORED_PAGES = gitIgnoredPages(PAGES);
  *
  * @returns baseURL 起点のページパス（先頭 "/" 付き）
  */
-function trackedPages(): string[] {
-  // 追跡中の .html を git に列挙させる（-z で改行を含む名前にも耐える）
-  const out = execFileSync("git", ["ls-files", "-z", "--", "*.html", "*.htm"], {
-    cwd: REPO_ROOT,
-    encoding: "utf8",
-  });
-  // NUL 区切りを分解し、baseURL 起点の書式へそろえる
-  return out.split("\0").filter(Boolean).map((p) => `/${p}`);
-}
+// 実体は e2e/lib/tracked-pages.ts（visual.spec.ts と共有。写しを持たない）
 
 // git が追跡しているのに findPages が拾えなかったページ（＝黙って検査から外れたページ）
 const UNDERIVED_PAGES = trackedPages().filter((p) => !PAGES.includes(p));
@@ -313,12 +307,10 @@ async function observePage(page: Page, path: string): Promise<PageObservation> {
   // 上限を伸ばして待てば見えるが、CSP と無関係なネットワーク事情でテストが遅く・
   // 不安定になり、しかも「十分待てたか」は環境依存なので確実にはならない。
   //
-  // この穴は **e2e/visual.spec.ts が塞いでいる**。ただし同スペックが比較するのは
-  // **index.html と resume.html を名指しした 2 本だけ**で、ここの PAGES のような
-  // 導出はしていない（いま全ページを覆えているのは、たまたまページが 2 枚しか
-  // 無いからにすぎない）。ページを足したときにこの説明が黙って嘘にならないよう、
-  // visual.spec.ts 側に「撮影対象がリポジトリの全ページを覆っているか」を
-  // git の追跡一覧（導出とは独立な手がかり）で突き合わせるガードを置いてある。
+  // この穴は **e2e/visual.spec.ts が塞いでいる**。同スペックは撮影対象を
+  // 手で並べず、ここと同じ `trackedPages()`（e2e/lib/tracked-pages.ts）から
+  // **導出**して 1 ページずつ撮る。ページを足せば撮影が 1 枚増えるので、
+  // 「全ページを覆っている」は約束ではなく構造として保たれる。
   // webfont がブロックされると代替フォントで描画され、
   // **実測でページの 7.2% のピクセルが変わる**（fonts.gstatic.com を止めて撮った
   // 全画面と正常時の全画面を比較した値）。playwright.config.ts の許容差は

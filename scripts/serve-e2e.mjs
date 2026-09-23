@@ -20,13 +20,14 @@
 
 // リポジトリ内の静的サーバー実装 (Node 標準ライブラリのみで組み立てられている)
 import { startStaticServer } from "./lib/static-server.mjs";
+// 配信ポートの唯一の定義（playwright.config.ts も同じものを読む）
+import { E2E_PORT } from "./lib/e2e-port.mjs";
 // このファイルの場所からリポジトリ直下を求めるための Node 標準モジュール
 import { dirname, resolve } from "node:path";
 // import.meta.url (file:// URL) を OS のパスへ変換する Node 標準モジュール
 import { fileURLToPath } from "node:url";
 
-// playwright.config.ts の baseURL と同じポート。値が割れると E2E が起動待ちでタイムアウトする
-const E2E_PORT = 4173;
+// 待ち受けポートは副作用の無い共有モジュールから読む（数字を書き写さない）
 
 // このファイルは scripts/ 配下にあるので、1 つ上がリポジトリ直下になる
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -37,12 +38,9 @@ const server = await startStaticServer(repoRoot, E2E_PORT);
 // 起動したことを標準出力に残す (CI のログで「配信が始まった」ことを確認できるようにする)
 console.log(`E2E static server listening on ${server.origin}`);
 
-// Playwright はテスト終了時にこのプロセスへシグナルを送る。
-// 受け取ったらサーバーを閉じてから終了し、ポートを確実に解放する
-for (const signal of ["SIGINT", "SIGTERM"]) {
-  // シグナルごとに後始末のハンドラを登録する
-  process.on(signal, () => {
-    // 待ち受けを閉じてからプロセスを終了する (閉じ終わるのを待たずに抜けない)
-    server.close().then(() => process.exit(0));
-  });
-}
+// **シグナルハンドラは置かない。** Playwright は webServer.gracefulShutdown を
+// 設定していない限り後始末で `process.kill(-pid, "SIGKILL")` を送る（実測: 通常終了後
+// ハンドラのログは 1 行も出ず、gracefulShutdown を足すと初めて出る）。SIGKILL は
+// 捕捉できないので、ハンドラを書いても動かないコードになるうえ（CLAUDE.md §6
+// デッドコードを残さない）、手で起動したときは Ctrl-C が `server.close()` の完了待ちに
+// 化けて止まらなくなる。ポートはプロセス終了時に OS が解放するので、何もしないのが正しい。

@@ -19,7 +19,10 @@ export default defineConfig({
     launchOptions: chromiumLaunchOptions(),
   },
   webServer: {
-    command: "npx --yes http-server . -p 4173",
+    // 配信はリポジトリ内の標準ライブラリだけのサーバーで行う。
+    // `npx --yes http-server` は未宣言・未ピンの依存を毎回レジストリから取ってきて実行する形で、
+    // この repo にコミットが無いまま E2E の実行内容が変わる（理由の正本は scripts/serve-e2e.mjs）
+    command: "node scripts/serve-e2e.mjs",
     url: "http://127.0.0.1:4173",
     reuseExistingServer: !process.env.CI,
     timeout: 60_000,

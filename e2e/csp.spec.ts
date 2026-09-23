@@ -313,8 +313,13 @@ async function observePage(page: Page, path: string): Promise<PageObservation> {
   // 上限を伸ばして待てば見えるが、CSP と無関係なネットワーク事情でテストが遅く・
   // 不安定になり、しかも「十分待てたか」は環境依存なので確実にはならない。
   //
-  // この穴は **e2e/visual.spec.ts が塞いでいる**。同スペックは全ページを
-  // toHaveScreenshot で比較する。webfont がブロックされると代替フォントで描画され、
+  // この穴は **e2e/visual.spec.ts が塞いでいる**。ただし同スペックが比較するのは
+  // **index.html と resume.html を名指しした 2 本だけ**で、ここの PAGES のような
+  // 導出はしていない（いま全ページを覆えているのは、たまたまページが 2 枚しか
+  // 無いからにすぎない）。ページを足したときにこの説明が黙って嘘にならないよう、
+  // visual.spec.ts 側に「撮影対象がリポジトリの全ページを覆っているか」を
+  // git の追跡一覧（導出とは独立な手がかり）で突き合わせるガードを置いてある。
+  // webfont がブロックされると代替フォントで描画され、
   // **実測でページの 7.2% のピクセルが変わる**（fonts.gstatic.com を止めて撮った
   // 全画面と正常時の全画面を比較した値）。playwright.config.ts の許容差は
   // maxDiffPixelRatio: 0.02（2%）なので 3.6 倍の余裕で落ちる。

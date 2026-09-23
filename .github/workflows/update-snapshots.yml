@@ -38,13 +38,22 @@ jobs:
         run: npx playwright test --update-snapshots
 
       - name: Commit updated snapshots
+        # ブランチ名は ${{ }} で run: へ直接埋め込まず、env 経由で渡して "$REF" と引用する。
+        # ${{ }} はシェルに渡る前にテキストとして展開されるため、埋め込むとブランチ名が
+        # そのままシェルの一部になる。git はブランチ名に空白と ~^:?*[\ を禁じているが
+        # `;` `&` `|` `$( )` バッククォートは許すので、`foo;id` のような名前を
+        # 作れる人は、contents: write を持つこのジョブで任意のコマンドを実行できる
+        # （§9 外部由来の値を文字列連結でシェルに渡さない）。
+        env:
+          # チェックアウトしているブランチ名。シェルには環境変数としてだけ渡す
+          REF: ${{ github.ref_name }}
         run: |
           if [[ -n "$(git status --porcelain e2e)" ]]; then
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
             git add e2e
             git commit -m "chore: update Playwright visual snapshots"
-            git push origin HEAD:${{ github.ref_name }}
+            git push origin "HEAD:$REF"
           else
             echo "No snapshot changes to commit."
           fi

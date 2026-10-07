@@ -32,6 +32,20 @@ const CONTENT_TYPES = {
 // 拡張子が対応表に無かったときに使う既定の Content-Type
 const DEFAULT_CONTENT_TYPE = "application/octet-stream";
 
+// 配信ルート配下でも返さないパスの構成要素。
+//
+// このサーバーはリポジトリ直下をそのまま配信するので、何も言わなければ `.git/config` や
+// `node_modules/` まで HTTP で読めてしまう。**とくに `.git/config` は CI で実害がある**:
+// `actions/checkout` は既定 (`persist-credentials: true`) で push 用の資格情報を
+// `.git/config` の `http.<host>.extraheader` に書き込むため、撮影・E2E の最中だけとはいえ
+// 「リポジトリへ書き込めるトークン」が 127.0.0.1 の HTTP 越しに読める状態になる。
+//
+// 以前この用途に使っていた `http-server` も既定で dotfile を配信していた（実測: `.git/config`
+// が 200 で中身ごと返る）ので、これは置き換えに伴う退行ではなく、置き換えを機に閉じる穴。
+// 配信対象のページが必要とするのは `data/portfolio.json` などの通常ファイルだけで、
+// ドットで始まる要素も `node_modules` も 1 つも参照していない（確認済み）。
+const DENIED_PATH_SEGMENTS = ["node_modules"];
+
 /**
  * 指定ディレクトリを配信する静的サーバーを起動する。
  *
@@ -59,6 +73,18 @@ export async function startStaticServer(rootDir, port) {
       // （"../../etc/passwd" のようなパストラバーサルを防ぐ。CLAUDE.md §9 最小権限・最小公開）
       if (filePath !== root && !filePath.startsWith(root + sep)) {
         // ルート外を指すリクエストは中身を返さず 403 で拒否する
+        res.writeHead(403).end("Forbidden");
+        return;
+      }
+
+      // 配信ルート配下であっても、隠しファイル/ディレクトリと node_modules は返さない。
+      // 判定は「結合後の実パスのうち、ルートより下の部分」に対して行う
+      // （ルート自体のパスにドット付きの要素が含まれていても巻き込まないため）
+      const insideRoot = filePath.slice(root.length + 1);
+      // パス区切りで分解し、1 つでも拒否対象の要素を含むなら配信しない
+      const segments = insideRoot.length === 0 ? [] : insideRoot.split(sep);
+      if (segments.some((s) => s.startsWith(".") || DENIED_PATH_SEGMENTS.includes(s))) {
+        // 存在の有無を漏らさないよう、ルート外と同じく 403 で拒否する
         res.writeHead(403).end("Forbidden");
         return;
       }

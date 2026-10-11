@@ -43,7 +43,7 @@ jobs:
       # 書き換えたときに黙ってずれる（同じ package-lock.json を別 major で動かす
       # ことになり、engines 違反が警告のまま埋もれる）。参照にすれば、そもそも
       # そろえるべき写しが存在しなくなる。ローカルでも `nvm use` が同じ版を選ぶ。
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
           # 依存はロックファイルで固定済みなので、~/.npm を再利用して毎回の
@@ -156,7 +156,7 @@ jobs:
       # 版は `.nvmrc` から読む（どの major を選ぶかの理由は html-validate ジョブのコメント）。
       # 同じ package-lock.json を入れるので、ここだけ別の major になると
       # 「同じ依存を 2 つの major で動かす」ことになり、engines 違反が警告のまま埋もれる
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
           # 依存はロックファイルで固定済みなので、~/.npm を再利用して毎回の
@@ -380,7 +380,7 @@ jobs:
         # したがって success() / failure() のどちらへ寄せても片方が壊れる。
         # 残る代償はキャンセルも無視して走ることだけで、絞るなら !cancelled()。
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: playwright-snapshots
           # test-results/ は 1 回目の出力先で、playwright.config.ts が outputDir を

@@ -34,7 +34,7 @@ Node 22 で入った `fs.globSync` を使うため。20 で走らせると `npx 
 ```bash
 npm ci                                          # 依存インストール（決定的）
 npx html-validate "**/*.{html,htm}"               # HTML 構文チェック（除外は .htmlvalidateignore）
-npm run test:unit                                # ユニットテスト（node --test。CI バッジの判定ロジック）
+npm run test:unit                                # ユニットテスト（node --test。bash と jq が必要。下記）
 npx playwright install --with-deps chromium      # 初回のみ: E2E 用ブラウザ
 npm run test:e2e                                 # Playwright（ビジュアルリグレッション + 機能 + CSP 違反）
 npm run test:lighthouse                          # Lighthouse CI（lhci autorun）
@@ -118,8 +118,20 @@ create or approve pull requests (createPullRequest)
   記録している）。PAT を設定した時点でこの枝は通らなくなる。
 - **PAT を設定しているのに PR を作れない場合は引き続き赤。** 「設定したのに効いていない」ことに
   気づく必要があるので、こちらは止める。
+- **原因が分かっている状態（更新ブランチの PR が別の base へ向いている）も引き続き赤。**
+  警告にすると、唯一効く指示（base を戻すかその PR を閉じる）が緑の run の注釈にしか載らず、
+  スケジュール実行では通知が飛ばない。しかも鮮度チェックの案内文（「手動で PR を作成・マージするか
+  PAT を設定」）は**この状態では両方とも効かない**（同じ head から作れば again "already exists"、
+  PAT を入れても邪魔な PR の base は変わらない）。
+- **警告は原因を断定しない。** 文言で判定しない方針の代償として、この枝に入るのは「PAT が無く、
+  PR も作れず、既存 PR も見つからなかった」ことだけで、`gh` の失敗理由は確かめていない
+  （トークン失効・PR 機能の無効化なども同じ枝に入る）。よくある原因を挙げ、実際の理由は
+  `gh` の出力を読んでもらう形にしてある。
 - **鮮度チェックは関数（`check_data_freshness`）にして、PR を作れなかった経路からも必ず通す。**
-  つまり**赤が出るのは「データが実際に届かなくなった」ときだけ**になった。この関数の挙動は
+  つまり**既知の塞がり方では赤にならず、データが実際に届かなくなったときに赤になる**。
+  赤がこれだけになったわけではない（同じステップには API の取得失敗・PR 先端の不一致・
+  base との競合など、データ停止とは無関係な `exit 1` が多数残っている）。赤を見たときは
+  まず注釈を読むこと。この関数の挙動は
   `tests/updater-freshness.test.mjs` が YAML から本体を切り出して `bash` で動かし、しきい値の
   両側・ミリ秒付きの値・判定材料なし・読めない値の 4 つを固定する（**`bash` と `jq` が必要**。
   ワークフロー自身も同じものを要求する）。2 つの経路から呼ばれていること・既知の塞がり方の枝が
@@ -204,8 +216,10 @@ name / path（`isCiWorkflow`）で済んでおり、run 単位で再判定して
 `fix(deploy): …` の日だけ `EXCLUDE_RE` に当たって正規の CI run が全滅する）。
 `isCiRun` が見るのは起動イベント（`workflow_run` かどうか）だけにしてある。
 
-**ユニットテストは `npm run test:unit`（`node --test`。追加依存なし）で、CI は
-`html-validate` ジョブの中で走らせる。** 専用ジョブを足さないのは、**ジョブ名が必須
+**ユニットテストは `npm run test:unit`（`node --test`）で、CI は `html-validate`
+ジョブの中で走らせる。** npm の依存は増やしていないが、**`bash` と `jq` が必要**
+（`tests/updater-freshness.test.mjs` が YAML から切り出したシェル関数を実際に動かすため。
+ワークフロー自身も同じものを要求する。GitHub の ubuntu ランナーには両方入っている）。 専用ジョブを足さないのは、**ジョブ名が必須
 ステータスチェックの登録名**で、登録されていない新しいジョブは赤くてもマージを止められない
 ため（止まらない検査は検査として機能しない）。`node --test` にパスを直接渡さず
 `scripts/run-unit-tests.mjs` を通すのは、**対象ファイルが 1 件も無いとき `node --test` が

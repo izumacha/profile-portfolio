@@ -10,7 +10,7 @@
 // 「違反ゼロ」ではなく前提が崩れた状態なので落とす（fail-closed）。
 import { describe, it } from "node:test"; // Node 同梱のテストランナー
 import assert from "node:assert/strict"; // Node 同梱の表明（厳密比較）
-import { readFileSync, mkdtempSync } from "node:fs"; // ワークフローの読み取りと作業場の用意
+import { readFileSync, mkdtempSync, rmSync } from "node:fs"; // ワークフローの読み取りと作業場の用意・片付け
 import { spawnSync } from "node:child_process"; // bash を起動して関数を実際に動かす
 import { tmpdir } from "node:os"; // 一時ディレクトリの置き場
 import { join } from "node:path"; // パスの組み立て
@@ -33,14 +33,25 @@ const fnSource = extractFunction("check_data_freshness"); // 鮮度チェック�
 const hoursMatch = source.match(/^\s*STALE_DATA_HOURS=(\d+)$/m); // しきい値（時間）
 const STALE_HOURS = hoursMatch ? Number(hoursMatch[1]) : null; // 数値にしておく
 
+// jq の stderr を置く作業場。**呼び出しごとに作らず 1 つを使い回し、終了時に消す**
+// （毎回 mkdtemp すると手元では実行回数ぶん一時ディレクトリが溜まる。CLAUDE.md §8）
+const workDir = mkdtempSync(join(tmpdir(), "updater-freshness-")); // 作業場を 1 つ用意する
+process.on("exit", () => {
+  // 後片付け。消せなくてもテストの結果は変えない（握り潰すのは片付けの失敗だけ）
+  try {
+    rmSync(workDir, { recursive: true, force: true }); // 作業場をまるごと消す
+  } catch {
+    // 片付けに失敗しても検査結果には影響しないので何もしない
+  }
+});
+
 // 指定した generated_at で関数を 1 回動かし、終了コードと注釈を返す
 function runFreshness(generatedAt) {
-  const dir = mkdtempSync(join(tmpdir(), "updater-freshness-")); // jq の stderr を置く場所
   const script = [
     "set -euo pipefail", // 本番のステップと同じ設定で動かす
     "BASE_BRANCH=main", // 注釈に埋め込まれるだけの値
     "DATA_FILE=data/portfolio.json", // 同上
-    `stale_err=${JSON.stringify(join(dir, "stale.err"))}`, // jq の stderr の退避先
+    `stale_err=${JSON.stringify(join(workDir, "stale.err"))}`, // jq の stderr の退避先（使い回す）
     ': > "$stale_err"', // 空ファイルとして用意する
     "escape_annotation() { cat; }", // 本番は sed/tr で無害化するが、挙動の検査には素通しで足りる
     "log() { :; }", // 進捗ログは捨てる
@@ -64,7 +75,7 @@ describe("updater の鮮度チェック", () => {
     assert.ok(fnSource, "check_data_freshness を切り出せない（関数の形を変えたらこの切り出しも直す）");
     assert.ok(Number.isInteger(STALE_HOURS) && STALE_HOURS > 0, "STALE_DATA_HOURS を読み取れない");
     // bash と jq が無いと何も検査できない（本番のステップも同じものを要求する）
-    assert.equal(spawnSync("bash", ["-c", "command -v jq >/dev/null"]).status, 0, "jq が必要です（apt install jq）");
+    assert.equal(spawnSync("bash", ["-c", "command -v jq >/dev/null"]).status, 0, "jq が必要です（このテストはワークフローと同じ jq / bash を使います）");
   });
 
   it("既知の塞がり方では赤で止めず、鮮度チェックを通してから緑で終える（配線の確認）", () => {
@@ -85,11 +96,41 @@ describe("updater の鮮度チェック", () => {
     assert.ok(green < red, "この枝が exit 1 で止まっている（赤が毎日出る状態に戻っている）");
   });
 
+  it("原因が分かっている状態は警告へ落とさず赤のまま（指示が通知で届くこと）", () => {
+    // base 付け替えの診断（base_mismatch_note）は、唯一効く指示を持っている。
+    // これを警告の枝より**後ろ**へ移すと、PAT が無い構成ではそちらに吸い込まれて
+    // 緑の run の注釈にしか載らず、スケジュール実行では誰にも届かない
+    const diagnosed = source.indexOf('if [ -n "$base_mismatch_note" ]; then');
+    const unknown = source.indexOf('if [ "$HAS_DEPLOY_TOKEN" != "true" ]; then');
+    assert.notEqual(diagnosed, -1, "base 付け違いを赤で止める枝が無い");
+    assert.notEqual(unknown, -1, "PAT の有無で分ける枝が無い");
+    assert.ok(diagnosed < unknown, "診断済みの枝が警告の枝より後ろにある（指示が通知で届かなくなる）");
+  });
+
   it("鮮度チェックは 2 つ以上の経路から呼ばれている", () => {
     // 片方の経路からしか呼ばれていないと、もう片方では検知が走らない
-    // （以前はまさに「手配が成功した経路」からしか到達しなかった）
-    const calls = source.match(/check_data_freshness "/g) ?? [];
-    assert.ok(calls.length >= 2, `呼び出しが ${calls.length} 箇所しかない`);
+    // （以前はまさに「手配が成功した経路」からしか到達しなかった）。
+    // **コメント中の言及は数えない** — このワークフローは経緯を長いコメントで残す慣習が
+    // あるので、`# 以前は check_data_freshness "…" をここで呼んでいた` のような 1 行を
+    // 残しつつ実際の呼び出しを削ると、件数だけ保たれて検出網が空回りする
+    const calls = source
+      .split("\n")
+      .map((line) => line.trim()) // 字下げを落として行頭を見る
+      .filter((line) => !line.startsWith("#")) // コメント行は数えない
+      .filter((line) => line.includes('check_data_freshness "')); // 引数付きの呼び出しだけ
+    assert.equal(calls.length, 2, `呼び出しが ${calls.length} 箇所（2 箇所であるべき）`);
+  });
+
+  it("手配が成功した経路の呼び出しは即時マージの日を除いている（誤検知の防止）", () => {
+    // **このゲートを外すと false red になる。** 停止が解消して初めて即時マージできた日は、
+    // MERGED_GENERATED_AT が停止期間中の古い値のままなので、すべて成功しているのに赤になり、
+    // しかも「必須チェックが失敗し続けている」と事実と違うことを言う。
+    // 関数化で「どちらの経路でも呼ぶ」形になった分、このゲートは「簡素化」の対象に見えるので、
+    // 呼び出しが必ずこの条件の直下にあることを形で固定する
+    assert.ok(
+      source.includes('if [ "$merge_mode" != "immediate" ]; then\n              check_data_freshness "'),
+      "末尾の呼び出しが `merge_mode != immediate` の直下に無い（即時マージの日に false red になる）",
+    );
   });
 
   it("しきい値より新しければ緑で通す", () => {

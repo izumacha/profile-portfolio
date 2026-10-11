@@ -794,6 +794,7 @@ jobs:
           # 第 1 引数は「停止を検知したとき何を確認すればよいか」の案内文（経路ごとに違う）。
           STALE_DATA_HOURS=48
           check_data_freshness() {
+              local next_step_hint data_is_stale   # 同じステップの他の関数と同じく局所化する
               next_step_hint="$1"   # 停止を検知したときに読ませる案内（経路ごとに違う）
               # 判定材料そのものが無い場合。前段（Commit to update branch）は空を赤で
               # 弾くのでここへは来ない想定だが、来たときに黙って素通りすると、この検知
@@ -1003,7 +1004,19 @@ jobs:
                       fi
                   fi
                   if [ -z "$pr_number" ]; then
-                      # 原因は 2 つあり、**赤にすべきかどうかが違う**ので分けて扱う。
+                      # 原因で**赤にすべきかどうかが違う**ので分けて扱う。
+                      #
+                      # base 付け替えのように**原因が分かっていて所有者が直せる**状態は、
+                      # 以前どおり赤で止める。警告にすると、唯一効く指示（base を戻すか
+                      # その PR を閉じる）が緑の run の注釈にしか載らず、スケジュール実行
+                      # では通知が飛ばない。48 時間後に鮮度チェックで赤になっても、その
+                      # 案内文は「手動で PR を作成・マージするか PAT を設定」なので
+                      # **どちらも効かない**（同じ head から作れば again "already exists"、
+                      # PAT を入れても邪魔な PR の base は変わらない）。
+                      if [ -n "$base_mismatch_note" ]; then
+                          echo "::error::${base_mismatch_note}PR を作成できませんでした（gh の出力: $(escape_annotation < "$create_err")）。更新ブランチ $DATA_BRANCH は push 済みです。"
+                          exit 1
+                      fi
                       if [ "$HAS_DEPLOY_TOKEN" != "true" ]; then
                           # **既知の塞がり方**: PAT が無い＝GITHUB_TOKEN で PR を作ろうとしており、
                           # リポジトリ設定「Allow GitHub Actions to create and approve pull requests」
@@ -1019,7 +1032,11 @@ jobs:
                           # 判定に gh のエラー文言（英語）は使わない（文言が変われば黙って効かなく
                           # なる。上の base_mismatch_note と同じ理由）。トークンの有無という
                           # 構造的な事実だけを見る。PAT を設定した時点でこの枝は通らなくなる。
-                          echo "::warning::${base_mismatch_note}PR を作成できませんでした（gh の出力: $(escape_annotation < "$create_err")）。PAGES_DEPLOY_TOKEN が未設定のため、リポジトリ設定の 'Allow GitHub Actions to create and approve pull requests' が無効だと GitHub が PR 作成を拒否します。更新ブランチ $DATA_BRANCH は push 済みなので、手動で PR を作成・マージすれば取り込めます。自動で完結させるには contents: write と pull-requests: write を持つ PAT を PAGES_DEPLOY_TOKEN に設定してください。"
+                          # **原因を断定しない。** この枝に入るのは「PAT が無く、PR も作れず、既存 PR も
+                          # 見つからなかった」ことだけで、gh の失敗理由までは確かめていない（文言で判定
+                          # しない方針の代償）。よくある原因を挙げるにとどめ、実際の理由は gh の出力を
+                          # 読んでもらう。トークン失効・PR 機能の無効化なども同じ枝に入る。
+                          echo "::warning::PR を作成できませんでした（gh の出力: $(escape_annotation < "$create_err")）。PAGES_DEPLOY_TOKEN が未設定の構成でよくある原因は、リポジトリ設定の 'Allow GitHub Actions to create and approve pull requests' が無効で GitHub が PR 作成を拒否することです（他の原因でも同じ警告になるので、実際の理由は上の gh の出力で確認してください）。更新ブランチ $DATA_BRANCH は push 済みなので、手動で PR を作成・マージすれば取り込めます。自動で完結させるには contents: write と pull-requests: write を持つ PAT を PAGES_DEPLOY_TOKEN に設定してください。"
                           check_data_freshness "PR を作成できない構成のため自動では取り込まれません。更新ブランチ $DATA_BRANCH は push 済みなので、手動で PR を作成・マージするか、PAGES_DEPLOY_TOKEN を設定してください。"
                           log "PR を作成できなかったため、データの鮮度だけ確認して正常終了します"
                           exit 0
@@ -1027,7 +1044,7 @@ jobs:
                       # PAT を設定しているのに PR を作れないのは設定の誤り（push は通るのに
                       # PR 作成が 403 になる＝pull-requests: write が無い）。所有者が直すべき
                       # 状態で、しかも「設定したのに効いていない」ことに気づく必要があるので赤で止める。
-                      echo "::error::${base_mismatch_note}PR を作成できませんでした（gh の出力: $(escape_annotation < "$create_err")）。PAGES_DEPLOY_TOKEN に contents: write と pull-requests: write の両方があるか確認してください（push だけ通って PR 作成が 403 になるのは pull-requests: write が無いときです）。更新ブランチ $DATA_BRANCH は push 済みです。"
+                      echo "::error::PR を作成できませんでした（gh の出力: $(escape_annotation < "$create_err")）。PAGES_DEPLOY_TOKEN に contents: write と pull-requests: write の両方があるか確認してください（push だけ通って PR 作成が 403 になるのは pull-requests: write が無いときです）。更新ブランチ $DATA_BRANCH は push 済みです。"
                       exit 1
                   fi
                   log "PR の作成は失敗しましたが、既存の PR #${pr_number} が見つかったため再利用します"

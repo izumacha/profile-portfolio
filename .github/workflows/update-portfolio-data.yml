@@ -782,6 +782,56 @@ jobs:
           stale_err="$(mktemp)"
           trap 'rm -f "$fetch_err" "$stale_err" "${create_err:-}"' EXIT
 
+          # 起点ブランチのデータが古くなっていないかを、PR の状態ではなく**成果物の側から**確かめる。
+          # 手配が成功しても取り込まれたとは限らない（予約は条件待ちのまま永久に成立しないことが
+          # ある）し、PR の状態から推測すると「詰まっている」と「復旧しつつある」を区別できず
+          # 誤検知する。実行間隔は 1 日なので、余裕を見て 2 日を閾値にする。
+          #
+          # **関数にしてあるのは、PR を作れなかった経路からも呼ぶため。** 以前はこの判定が
+          # ステップの末尾に直接書かれており、PR 作成の失敗がその手前で exit 1 していたため
+          # **一度も到達しなかった**（CLAUDE.md §3 がその穴を記録している。実測で 2 か月以上、
+          # 毎日の赤はすべて PR 作成の失敗で、この検知が鳴ったことは一度も無い）。
+          # 第 1 引数は「停止を検知したとき何を確認すればよいか」の案内文（経路ごとに違う）。
+          STALE_DATA_HOURS=48
+          check_data_freshness() {
+              next_step_hint="$1"   # 停止を検知したときに読ませる案内（経路ごとに違う）
+              # 判定材料そのものが無い場合。前段（Commit to update branch）は空を赤で
+              # 弾くのでここへは来ない想定だが、来たときに黙って素通りすると、この検知
+              # だけが無言で止まる＝下で潰している「緑のままデータが止まる」状態になる。
+              if [ -z "$MERGED_GENERATED_AT" ]; then
+                  echo "::error::$BASE_BRANCH の $DATA_FILE から generated_at を受け取れていないため、データの鮮度を確認できません。前段の出力受け渡しを確認してください。"
+                  exit 1
+              fi
+              # 起点ブランチのデータが古すぎないかを判定する（時刻計算は移植性のため jq で行う）。
+              # generated_at は JavaScript の toISOString() 由来でミリ秒を含む
+              # （例: 2026-08-02T21:43:22.448Z）。jq の fromdateiso8601 は秒までしか
+              # 解釈できずエラーになるため、小数部を落としてから渡す。
+              # `$(cmd || echo X)` の形は使わない（部分出力とフォールバックが連結して
+              # 壊れた値になるため。read_pr_field のコメント参照）。
+              if ! data_is_stale="$(jq -rn \
+                  --arg t "$MERGED_GENERATED_AT" \
+                  --argjson h "$STALE_DATA_HOURS" \
+                  '($t | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) < (now - $h * 3600)' \
+                  2>"$stale_err")"; then
+                  # 判定できない＝この安全網が外れている、ということ。generated_at が
+                  # 解釈できない形（手で編集された・生成側の書式が変わった等）になると、
+                  # 以降この検知は二度と発火しない。それを警告で流すと、下のコメントの
+                  # とおりスケジュール実行では誰にも届かず、緑のままデータが止まる状態に
+                  # 戻ってしまうので、停止を検知したときと同じく赤で終わらせる。
+                  echo "::error::$BASE_BRANCH の $DATA_FILE の鮮度を判定できませんでした（generated_at: $(printf '%s' "$MERGED_GENERATED_AT" | escape_annotation)）: $(escape_annotation < "$stale_err")。値が ISO 8601 の想定どおりか確認してください。判定できない間はデータ停止を検知できません。"
+                  exit 1
+              fi
+              if [ "$data_is_stale" = "true" ]; then
+                  echo "::error::$BASE_BRANCH の $DATA_FILE が ${STALE_DATA_HOURS} 時間以上更新されていません（最終: ${MERGED_GENERATED_AT}）。${next_step_hint}"
+                  # 警告では気づけない。スケジュール実行の失敗通知は「赤」にしか届かず、
+                  # 緑のまま何日もデータが止まる状態こそ無くしたいものなので、ここは赤で
+                  # 終わらせる（この検知は成果物そのものを見ているので誤検知しない。
+                  # 直した直後の 1 回だけは前回までの停止を反映して赤になるが、
+                  # 取り込まれれば緑に戻る）。
+                  exit 1
+              fi
+          }
+
           # PR の先端が「この実行で push したコミットを含んでいる」かを判定する。
           # 完全一致にしないのは、更新ブランチへ正当に別のコミットが積まれることがあるため
           # （ci.yml の visual-regression がベースライン画像を PR ブランチへ自動コミットする）。
@@ -953,13 +1003,31 @@ jobs:
                       fi
                   fi
                   if [ -z "$pr_number" ]; then
-                      # 代表的な原因は 2 つあり、どちらかで案内先が変わるため両方を挙げる:
-                      #   - PAGES_DEPLOY_TOKEN 未設定 … リポジトリ設定
-                      #     「Allow GitHub Actions to create and approve pull requests」が無効だと拒否される
-                      #   - PAGES_DEPLOY_TOKEN 設定済みだが権限不足 … push は通るが PR 作成が 403 になる
-                      # 更新ブランチは push 済みなので手動で PR を作れば取り込めるが、
-                      # 気づかないまま放置されないようジョブは赤で終わらせる。
-                      echo "::error::${base_mismatch_note}PR を作成できませんでした（gh の出力: $(escape_annotation < "$create_err")）。PAGES_DEPLOY_TOKEN を設定している場合は contents: write に加えて pull-requests: write の権限があるか確認してください。未設定の場合はリポジトリ設定の 'Allow GitHub Actions to create and approve pull requests' を有効にするか、PAGES_DEPLOY_TOKEN を設定してください。更新ブランチ $DATA_BRANCH は push 済みです。"
+                      # 原因は 2 つあり、**赤にすべきかどうかが違う**ので分けて扱う。
+                      if [ "$HAS_DEPLOY_TOKEN" != "true" ]; then
+                          # **既知の塞がり方**: PAT が無い＝GITHUB_TOKEN で PR を作ろうとしており、
+                          # リポジトリ設定「Allow GitHub Actions to create and approve pull requests」
+                          # が無効（GitHub の既定）だと GitHub がこれを拒否する。設定を変えられるのは
+                          # リポジトリの所有者だけで、ワークフロー側で直せることは何も無い。
+                          #
+                          # **ここを赤で終わらせると毎日必ず赤になり、赤が合図として機能しなくなる。**
+                          # 実測で 2 か月以上、毎日の赤は誰にも拾われなかった（CLAUDE.md §3）。
+                          # データ自体は更新ブランチへ push 済みなので、原因と対処を警告で出し、
+                          # **成果物の鮮度チェックを必ず通してから**緑で終える。赤はそちらが担当する
+                          # ——「データが実際に届かなくなった」ときにだけ鳴る、意味のある赤になる。
+                          #
+                          # 判定に gh のエラー文言（英語）は使わない（文言が変われば黙って効かなく
+                          # なる。上の base_mismatch_note と同じ理由）。トークンの有無という
+                          # 構造的な事実だけを見る。PAT を設定した時点でこの枝は通らなくなる。
+                          echo "::warning::${base_mismatch_note}PR を作成できませんでした（gh の出力: $(escape_annotation < "$create_err")）。PAGES_DEPLOY_TOKEN が未設定のため、リポジトリ設定の 'Allow GitHub Actions to create and approve pull requests' が無効だと GitHub が PR 作成を拒否します。更新ブランチ $DATA_BRANCH は push 済みなので、手動で PR を作成・マージすれば取り込めます。自動で完結させるには contents: write と pull-requests: write を持つ PAT を PAGES_DEPLOY_TOKEN に設定してください。"
+                          check_data_freshness "PR を作成できない構成のため自動では取り込まれません。更新ブランチ $DATA_BRANCH は push 済みなので、手動で PR を作成・マージするか、PAGES_DEPLOY_TOKEN を設定してください。"
+                          log "PR を作成できなかったため、データの鮮度だけ確認して正常終了します"
+                          exit 0
+                      fi
+                      # PAT を設定しているのに PR を作れないのは設定の誤り（push は通るのに
+                      # PR 作成が 403 になる＝pull-requests: write が無い）。所有者が直すべき
+                      # 状態で、しかも「設定したのに効いていない」ことに気づく必要があるので赤で止める。
+                      echo "::error::${base_mismatch_note}PR を作成できませんでした（gh の出力: $(escape_annotation < "$create_err")）。PAGES_DEPLOY_TOKEN に contents: write と pull-requests: write の両方があるか確認してください（push だけ通って PR 作成が 403 になるのは pull-requests: write が無いときです）。更新ブランチ $DATA_BRANCH は push 済みです。"
                       exit 1
                   fi
                   log "PR の作成は失敗しましたが、既存の PR #${pr_number} が見つかったため再利用します"
@@ -1171,49 +1239,10 @@ jobs:
               echo "::warning::PAGES_DEPLOY_TOKEN が未設定のため、この PR の必須ステータスチェックは自動起動しません。auto-merge は条件待ちのままになるので、PR #${pr_number} は手動でチェックを起動してマージしてください。自動で完結させるには contents: write と pull-requests: write を持つ PAT を PAGES_DEPLOY_TOKEN に設定してください。"
           fi
 
-          # 手配が成功しても、それが実際に取り込まれたとは限らない（予約は条件待ちのまま
-          # 永久に成立しないことがある）。PR の状態から推測すると「詰まっている」と
-          # 「復旧しつつある」を区別できず誤検知するので、成果物の側から確かめる:
-          # 起点ブランチの generated_at が何日も更新されていなければ、手配が緑でも
-          # データは届いていない。実行間隔は 1 日なので、余裕を見て 2 日を閾値にする。
+          # 成果物の鮮度は、手配が成功した経路でも PR を作れなかった経路でも確かめる
+          # （関数の定義はステップ前半。経路ごとに案内文だけを変える）。
           # 即時マージできた日は、この実行でデータが取り込まれているため確認不要
           # （起点ブランチの値は実行開始時点のもので、この実行の結果を反映しない）。
-          STALE_DATA_HOURS=48
           if [ "$merge_mode" != "immediate" ]; then
-              # 判定材料そのものが無い場合。前段（Commit to update branch）は空を赤で
-              # 弾くのでここへは来ない想定だが、来たときに黙って素通りすると、この検知
-              # だけが無言で止まる＝下で潰している「緑のままデータが止まる」状態になる。
-              if [ -z "$MERGED_GENERATED_AT" ]; then
-                  echo "::error::$BASE_BRANCH の $DATA_FILE から generated_at を受け取れていないため、データの鮮度を確認できません。更新 PR の手配自体は成功しています。前段の出力受け渡しを確認してください。"
-                  exit 1
-              fi
-              # 起点ブランチのデータが古すぎないかを判定する（時刻計算は移植性のため jq で行う）。
-              # generated_at は JavaScript の toISOString() 由来でミリ秒を含む
-              # （例: 2026-08-02T21:43:22.448Z）。jq の fromdateiso8601 は秒までしか
-              # 解釈できずエラーになるため、小数部を落としてから渡す。
-              # `$(cmd || echo X)` の形は使わない（部分出力とフォールバックが連結して
-              # 壊れた値になるため。read_pr_field のコメント参照）。
-              if ! data_is_stale="$(jq -rn \
-                  --arg t "$MERGED_GENERATED_AT" \
-                  --argjson h "$STALE_DATA_HOURS" \
-                  '($t | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) < (now - $h * 3600)' \
-                  2>"$stale_err")"; then
-                  # 判定できない＝この安全網が外れている、ということ。generated_at が
-                  # 解釈できない形（手で編集された・生成側の書式が変わった等）になると、
-                  # 以降この検知は二度と発火しない。それを警告で流すと、下のコメントの
-                  # とおりスケジュール実行では誰にも届かず、緑のままデータが止まる状態に
-                  # 戻ってしまうので、停止を検知したときと同じく赤で終わらせる。
-                  # （手配自体は上で済んでおり、赤にしても取り込みは妨げない。）
-                  echo "::error::$BASE_BRANCH の $DATA_FILE の鮮度を判定できませんでした（generated_at: $(printf '%s' "$MERGED_GENERATED_AT" | escape_annotation)）: $(escape_annotation < "$stale_err")。値が ISO 8601 の想定どおりか確認してください。判定できない間はデータ停止を検知できません。"
-                  exit 1
-              fi
-              if [ "$data_is_stale" = "true" ]; then
-                  echo "::error::$BASE_BRANCH の $DATA_FILE が ${STALE_DATA_HOURS} 時間以上更新されていません（最終: ${MERGED_GENERATED_AT}）。更新 PR の手配自体は成功しているので、必須チェックが失敗し続けている・auto-merge が成立していない・このワークフローを直した直後で前回までの停止が残っている、のいずれかです。PR #${pr_number} の状態を確認してください。"
-                  # 警告では気づけない。スケジュール実行の失敗通知は「赤」にしか届かず、
-                  # 緑のまま何日もデータが止まる状態こそ本 PR が無くそうとしたものなので、
-                  # 手配が成功していてもここは赤で終わらせる。
-                  # （この検知は成果物そのものを見ているので誤検知しない。直した直後の
-                  #   1 回だけは前回までの停止を反映して赤になるが、取り込まれれば緑に戻る。）
-                  exit 1
-              fi
+              check_data_freshness "更新 PR の手配自体は成功しているので、必須チェックが失敗し続けている・auto-merge が成立していない・このワークフローを直した直後で前回までの停止が残っている、のいずれかです。PR #${pr_number} の状態を確認してください。"
           fi

@@ -131,6 +131,40 @@ GitHub Pages は HTTP レスポンスヘッダを付けられないため、CSP 
 **`waitUntil` を `"domcontentloaded"` にしても速くならない（試して戻した）。** `<head>` の Google Fonts の stylesheet がパーサをブロックし、body 末尾のインライン script はそれを待ってからでないと実行できないため、DOMContentLoaded 自体が stylesheet 取得後にしか発火しない。速くするには第三者フォントを止めるしかないが、そうすると `style-src` の `fonts.googleapis.com` が一度も試されなくなる（許可を外しても緑になる）ので、待ち時間と引き換えにその検査を取っている。（**各 `waitUntil` の実測ミリ秒は `e2e/csp.spec.ts` の該当コメントが持つ。** 上と同じ理由でここへ写さない。§6 DRY）
 
 
+### `npm audit` の high を据え置いている理由（受け入れの記録）
+
+**`npm audit --audit-level=high` は現在 11 件を報告する**（`moderate` 4 件・`low` 2 件を含めると 17 件。`critical` は 0 件）。
+CI は `npm audit` を流していないので（`ci.yml` の 3 ジョブは html-validate / link-check / visual-regression、
+`lighthouse.yml` が lighthouse）、**この記録が無いと誰も再確認しない** — §9 の「既知脆弱性を定期的に
+確認し、放置しない」を満たすため、据え置きの判断をここに置く。
+
+**根は 1 つしかない: `@lhci/cli`（Lighthouse CI の CLI）が引き込む依存**で、`moderate` / `low` の 6 件（`argparse` / `js-yaml` / `sprintf-js` / `uuid` / `external-editor` / `inquirer`）も同じ配下にある。
+
+| 報告されるパッケージ | 経路 | npm が示す唯一の修正 |
+| --- | --- | --- |
+| `lighthouse` / `puppeteer-core` / `@puppeteer/browsers` / `extract-zip` / `basic-ftp` / `get-uri` / `pac-proxy-agent` / `proxy-agent` / `tmp` / `@lhci/utils`（→ `js-yaml`） | すべて `@lhci/cli` 配下 | `@lhci/cli@0.1.0`（**0.15.1 からの major ダウングレード**。Lighthouse CI が動かなくなる） |
+
+**`@lhci/cli` は既に最新版（0.15.1）で、上げて直す道が無い**（`npm view @lhci/cli version` で確認できる）。
+`npm audit fix` で直るものは済ませてある（`proxy-addr` 2.0.7 → 2.0.8 で critical 1 件、`compression`
+1.8.1 → 1.8.2 で high 1 件、`fast-uri` 3.1.7 → 3.1.8 で moderate 1 件。いずれも推移依存なので
+`package.json` は変わらない）。
+
+**なぜ据え置けるのか（helpdesk-hub の同じ記録とは前提が違う）。** `package.json` の `dependencies` は
+**空**で、`@lhci/cli` / `@playwright/test` / `html-validate` の 3 つはすべて devDependency。
+§1 のとおりサイト本体に**ページ生成のビルドステップが無く**、`index.html` / `resume.html` をそのまま
+GitHub Pages が配信するため、**`node_modules` は 1 バイトも配信物に入らない**（helpdesk-hub は
+Dockerfile が実行イメージへ `node_modules` を丸ごとコピーするので、あちらは「本番イメージに同梱される」と
+書いてある。ここはその条件が成り立たない）。
+
+**「開発時の依存だから無害」と書かないこと。** 正しい言い方は「**配信物には入らないが、CI の
+lighthouse ジョブと開発者の手元では実行される**」。扱う入力はこのリポジトリ自身の静的ファイルと
+`lighthouserc.json` だけで、外部から与えられないため悪用の経路が無い（`tmp` のシンボリックリンク書き込みや
+`extract-zip` のパストラバーサルは、攻撃者が入力を与えられる前提の脆弱性）。
+
+**据え置きを解除する条件**: 上流 `@lhci/cli` が `lighthouse` / `puppeteer-core` を上げた版を出したとき。
+**確認は `npm audit --audit-level=high`。** `overrides` で推移依存を跨ぐ手もあるが、Lighthouse CI は
+puppeteer の内部 API に結び付くので、入れるなら `npm run test:lighthouse` が通ることを必ず確認する。
+
 ### セクション追加時のチェックリスト
 
 1. `index.html` に `<section id="xxx">` を追加する。

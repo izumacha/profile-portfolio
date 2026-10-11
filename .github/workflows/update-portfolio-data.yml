@@ -119,6 +119,14 @@ jobs:
         with:
           script: |
             const fs = require("fs");
+            // CI バッジが何を名乗るかの判定だけを切り出したモジュール。
+            // **ここに判定を書き戻さないこと。** YAML の中のインライン script は
+            // `node --test` から呼べないので、実装を間違えても何も落ちない
+            // （実際この判定には 3 つの誤りが同時にあり、2 か月以上そのまま出荷されていた。
+            // 内訳は同モジュールの冒頭と CLAUDE.md §3 を参照）。
+            // github-script の `require` はアクション側のディレクトリを基準に解決するため、
+            // ワークスペースの絶対パスで読む（公式に案内されている書き方）。
+            const ciVerdict = require(`${process.env.GITHUB_WORKSPACE}/scripts/lib/ci-verdict.cjs`);
             // 書き出し先はワークフロー env の DATA_FILE を唯一の参照元にする
             // （後段の差分判定シェルと同じ値を見るため。§6 の一元管理）
             const path = process.env.DATA_FILE;
@@ -147,12 +155,16 @@ jobs:
               const repoInfo = await github.rest.repos.get({ owner: t.owner, repo: t.repo });
               const branch = repoInfo.data.default_branch;
 
-              // 既定ブランチ最新コミットを取得
+              // 既定ブランチの直近コミットを新しい順に取得する。
+              // **1 件ではなく複数件引く。** CI の判定が付いたコミットまで遡るのに使う
+              // （この updater 自身の push は GITHUB_TOKEN で行われるため、GitHub の仕様で
+              // 他のワークフローを起動しない＝先頭コミットには CI の run が 1 つも無い。
+              // 1 件しか引かない形では、updater が更新した翌日は必ず「CI 情報なし」になる）。
               const commits = await github.rest.repos.listCommits({
                 owner: t.owner,
                 repo: t.repo,
                 sha: branch,
-                per_page: 1,
+                per_page: ciVerdict.COMMIT_LOOKBACK,
               });
               const head = commits.data[0];
               const sha = head ? head.sha : "";
@@ -162,49 +174,55 @@ jobs:
                 url: head ? head.html_url : "",
               };
 
-              // 最新のワークフロー実行（CI）の結論と実行ページ URL を取得。
-              // バッジの自己証明性を守るため、以下を満たす run だけを採用する:
-              //   (a) いま表示しているコミット（取得済み最新コミット sha = head_sha）に対する run であること
-              //       → 古い成功 run を新しいコミットに対応づけて緑バッジを出す自己矛盾を防ぐ（Codex 指摘 P2）
-              //   (b) 「本物の CI」ワークフローの run であること（このワークフロー自身＝updater は除外）
-              //       → listWorkflowRunsForRepo はリポジトリ全体の最新 run を返すため、
-              //         profile-portfolio では updater 自身が最新 run になり、updater の in_progress バッジが
-              //         付いてしまう。CI 用ワークフロー名/パスに限定し、updater を弾く（Codex 指摘 P2）。
-              let ci = { status: "none", run_url: "", branch };
+              // CI の判定（結論・実行ページ URL・どのコミットの判定か）を取得する。
+              // **判定そのものは scripts/lib/ci-verdict.cjs が持つ**（テストで固定されている）。
+              // ここはその純粋ロジックへ「API をどう叩くか」だけを注入する。
+              //
+              // 守っている不変条件は 3 つで、どれも閾値ではなく形で閉じている:
+              //   (a) 採るのは**そのコミットに対する run** だけ（古い成功 run を新しいコミットの
+              //       緑バッジとして黙って出さない。遡ったときは is_head: false として画面が明示する）
+              //   (b) **ワークフロー単位**で run を引く（リポジトリ全体を 1 ページ引く形では、
+              //       schedule で頻繁に走るワークフローが 1 ページを埋め尽くし、ちょうど 1 件の
+              //       ci.yml がページ外に落ちる）
+              //   (c) CI を**追いかける**後続ワークフロー（workflow_run で起動するもの）は CI として
+              //       読まない（必ず CI より後に作られるので、時刻で選ぶと必ずこちらが勝つ）
+              //
+              // 判定が無い場合は none のまま＝中立の「CI 情報なし」を出す。
+              // sha7 / is_head は「どのコミットの判定か」を画面へ渡すためのもので、
+              // 判定が無いときは添える相手がいないので空／true にしておく。
+              let ci = { status: "none", run_url: "", branch, sha7: "", is_head: true };
               try {
-                // CI とみなすワークフロー名/ファイルパスの許可パターン（小文字比較）。
-                // 一般的な CI / Lighthouse 系を対象にし、それ以外（特に本 updater）は除外する。
-                const CI_NAME_RE = /(\bci\b|build|test|lint|lighthouse|playwright|e2e|verify)/i;
-                // 明示的に除外するワークフロー（このリポジトリの updater 自身など）。
-                const EXCLUDE_RE = /(update[\s_-]*portfolio|portfolio[\s_-]*data|update[\s_-]*snapshots|deploy|pages)/i;
-
-                // sha 一致を厳密に判定するため、その sha の run をまとめて取得する。
-                // head_sha フィルタが使える GitHub API ではそれを使い、対象コミットの run のみに絞る。
-                const runs = await github.rest.actions.listWorkflowRunsForRepo({
+                // このリポジトリに定義されているワークフローの一覧（CI の絞り込みに使う）。
+                // paginate で全件取るので、ワークフローが増えても取りこぼさない。
+                const workflows = await github.paginate(github.rest.actions.listRepoWorkflows, {
                   owner: t.owner,
                   repo: t.repo,
-                  branch,
-                  head_sha: sha || undefined, // 表示中コミットに対する run だけを取得（P2-(a)）
-                  per_page: 30,
+                  per_page: 100,
                 });
-                const list = (runs.data.workflow_runs || []).filter((run) => {
-                  // 二重防御: API が head_sha を無視した場合でも sha 一致を必須にする（P2-(a)）
-                  if (sha && run.head_sha !== sha) return false;
-                  // ワークフロー名・パスを使って CI を判定し、updater 等は除外する（P2-(b)）
-                  const name = run.name || "";
-                  const wfPath = run.path || ""; // 例: ".github/workflows/ci.yml"
-                  if (EXCLUDE_RE.test(name) || EXCLUDE_RE.test(wfPath)) return false;
-                  return CI_NAME_RE.test(name) || CI_NAME_RE.test(wfPath);
+
+                const verdict = await ciVerdict.resolveCiVerdict({
+                  commits: commits.data, // 既定ブランチの直近コミット（新しい順）
+                  workflows, // CI かどうかの判定に使うワークフロー一覧
+                  // 1 ワークフロー × 1 コミット分の run を引く。
+                  // **branch は渡さない** — 絞り込みは head_sha で厳密に効いており、
+                  // branch を足すと pull_request 起動の run（head_branch が PR のブランチ）を
+                  // 取りこぼす側にしか働かない。
+                  listWorkflowRuns: async ({ workflow_id, sha }) => {
+                    const res = await github.rest.actions.listWorkflowRuns({
+                      owner: t.owner,
+                      repo: t.repo,
+                      workflow_id,
+                      head_sha: sha,
+                      per_page: 100,
+                    });
+                    return res.data.workflow_runs || [];
+                  },
                 });
-                // 残った中で最新の run（created_at 降順の先頭）を採用する
-                list.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-                const run = list[0];
-                if (run) {
-                  // 進行中（conclusion 未確定）は in_progress、完了済みは conclusion（success/failure 等）を正直に出す
-                  const status = run.conclusion || (run.status === "completed" ? "none" : "in_progress");
-                  ci = { status, run_url: run.html_url, branch };
+
+                // 判定が付いたら採用する（付かなければ上の none のまま）
+                if (verdict) {
+                  ci = { ...verdict, branch };
                 }
-                // 該当する CI run が無い場合は ci = none のまま（古い run を流用せず正直に出す）
               } catch (e) {
                 // Actions が無効なリポジトリ等。取得できていないだけなので、可能なら
                 // 前回値を保ち、degraded を立てて stale として出す。

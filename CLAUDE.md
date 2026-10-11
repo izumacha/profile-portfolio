@@ -34,6 +34,7 @@ Node 22 で入った `fs.globSync` を使うため。20 で走らせると `npx 
 ```bash
 npm ci                                          # 依存インストール（決定的）
 npx html-validate "**/*.{html,htm}"               # HTML 構文チェック（除外は .htmlvalidateignore）
+npm run test:unit                                # ユニットテスト（node --test。CI バッジの判定ロジック）
 npx playwright install --with-deps chromium      # 初回のみ: E2E 用ブラウザ
 npm run test:e2e                                 # Playwright（ビジュアルリグレッション + 機能 + CSP 違反）
 npm run test:lighthouse                          # Lighthouse CI（lhci autorun）
@@ -80,6 +81,9 @@ GIF 化に `ffmpeg` を使うため事前にインストールしておく。ブ
 | `scripts/lib/scroll-priming.mjs` | スクロール連動アニメーションを事前発火させる共有ヘルパー（撮影と E2E で共用） |
 | `scripts/lib/static-server.mjs` | 撮影時に `data/portfolio.json` を fetch できるようにするローカル静的サーバー |
 | `scripts/lib/chromium-launch-options.mjs` | Chromium 実行ファイルの差し替え（`PLAYWRIGHT_CHROMIUM_PATH`）を組み立てる共有ヘルパー（撮影と E2E で共用） |
+| `scripts/lib/ci-verdict.cjs` | `data/portfolio.json` の CI バッジが何を名乗るかを決める純粋ロジック（下記。updater のワークフローから `require` される） |
+| `scripts/run-unit-tests.mjs` | `tests/` のユニットテストを走らせる小さなランナー（0 件のとき落とすため。下記） |
+| `tests/ci-verdict.test.mjs` | 上の判定を固定するユニットテスト（`node --test`） |
 | `docs/screenshots/` | README 掲載用のスクリーンショットとデモ GIF（自動生成物） |
 
 ### `data/portfolio.json` の自動更新は設定待ちで止まっている
@@ -128,6 +132,83 @@ auto-merge は条件待ちのまま永久に成立しない（ワークフロー
 2 か月間、毎日の赤が誰にも拾われなかった。**本筋は `PAGES_DEPLOY_TOKEN` を入れること。**
 入れない運用を選ぶなら、**既知の塞がり方のときは警告を出して緑で終わる**ようにワークフローを
 変え、赤が意味を持つ状態を保つこと（そうしないと、データ取得そのものが壊れた日に気付けない）。
+
+### CI バッジが何を名乗るかは `scripts/lib/ci-verdict.cjs` が決める
+
+`index.html` 冒頭の「Live self-proof」バッジは `data/portfolio.json` の `repos[].ci.status` を
+そのまま日本語ラベルにして出す（`CI 成功` / `CI 失敗` / `CI スキップ` / `CI 情報なし` 等）。
+**その値を決める判定は `scripts/lib/ci-verdict.cjs` が唯一の正本**で、updater の
+ワークフロー（`.github/workflows/update-portfolio-data.yml`）は「API をどう叩くか」だけを
+注入する。
+
+**判定を YAML のインライン script へ書き戻さないこと。** `actions/github-script` の
+`script:` ブロックは `node --test` から呼べないので、**実装を間違えても何も落ちない**。
+実際この判定には 3 つの欠陥が同時にあり、2 か月以上そのまま出荷されていた
+（**2026-10 時点**の `data/portfolio.json` の履歴 59 スナップショット＝236 リポジトリ観測のうち
+**92 件＝約 39% が事実と違うバッジ**だった。内訳は `success` 136 / `skipped` 54 / `none` 38 /
+`failure` 6 / `in_progress` 1 / `cancelled` 1 で、このうち `skipped` 54 件・`none` 34 件・
+`failure` 4 件が誤り＝そのコミットの `ci.yml` は**すべて success だった**。残る `none` 4 件は
+データ投入前の 1 回目で、これは正しく「CI 情報なし」。`failure` の残る 2 件は本物の失敗
+（helpdesk-hub の `ci.yml` と profile-portfolio の `lighthouse.yml`）で、正しい表示）。調べ方は
+`git log -- data/portfolio.json` で各スナップショットの `ci.status` と `last_commit.sha7` を
+取り出し、その sha に対する run を GitHub API で引き直す。
+
+3 つの欠陥と、それを**閾値ではなく形で**閉じた手は次のとおり。
+
+| 誤り | 根本原因 | 閉じ方 |
+| --- | --- | --- |
+| `skipped` 54 件＋`failure` 4 件（全部 AI-Docker-Environment） | CI を*追いかける*後続ワークフロー（`post-ci-verify.yml`。`workflow_run` で起動するので**定義上 CI より後に作られる**）が「`created_at` が最新の run を採る」規則で必ず勝ち、その結論が出ていた | run の **`event === "workflow_run"` を除外**する。名前で `verify` を禁じる手は採らない（本物の CI が verify を名乗る権利を奪うし、後続ワークフローの名前は repo ごとに違うので綴りを足し続けることになる） |
+| `none` 6 件（helpdesk-hub） | リポジトリ全体の run を 1 ページ（30 件）だけ引いていたため、`schedule` で頻繁に走るワークフローがページを埋め尽くしていた（実測で helpdesk-hub は同一 sha に 90 件の run を持ち、うち 77 件が `sla-reminders`。`ci.yml` はちょうど 1 件でページ外） | **ワークフロー単位**で run を引く（`listRepoWorkflows` → CI のものだけ `listWorkflowRuns`）。ページ数を増やす形では「もっと走るワークフローが来たら同じことが起きる」ままになる |
+| `none` 28 件（profile-portfolio） | updater 自身の push は `GITHUB_TOKEN` で行われ、**GitHub の仕様で他のワークフローを起動しない**ので、既定ブランチの先頭コミットには CI の run が 1 つも無い。「先頭コミットの run だけを採る」規則では判定なしになる | 判定が付くまで直近コミットを遡り（`COMMIT_LOOKBACK` 件）、**どのコミットの判定かを `ci.sha7` / `ci.is_head` で一緒に返す**。画面は `is_head === false` のとき `CI 成功（abc1234 時点）`のように出どころを添える |
+
+**遡った判定を黙って出さないことが要点。** 「先頭コミットの run だけ」という以前の規則は、
+古い成功 run を新しいコミットの緑バッジとして出す自己矛盾を防ぐためのもので、その意図は正しい。
+遡るようにしても、**どのコミットの判定かを画面に出す**のであれば自己証明性は壊れない
+（`e2e/sections.spec.ts` の「index.html の CI バッジの出どころ表示」が、フィクスチャで
+`is_head` の真偽ごとに表示を固定する。実データは毎日変わるので実データでは固定できない）。
+
+あわせて、**CI が複数あるリポジトリでは最も悪い結論を名乗る**（`STATUS_PRECEDENCE`）。
+「最新の run を採る」形だと `ci.yml` が緑・`lighthouse.yml` が赤の日に緑を出してしまう。
+GitHub が将来新しい結論を増やしたときに `success` で打ち消されないよう、**知らない結論は
+`success` / `in_progress` より前**に順位付けしてある（fail-closed）。
+
+**`index.html` の `CI_LABELS` は `STATUS_PRECEDENCE` の語彙を網羅していなければならない。**
+`CI_LABELS` は未知のキーを `none`（「CI 情報なし」）へ落とすので、ラベルを足し忘れると
+**fail-closed で選んだ悪い判定が中立の「CI 情報なし」として描画される**（緑が警告ではなく
+「情報なし」へ退行し、しかも実行ページへのリンクは付いたまま「情報が無い」と主張する）。
+足し忘れは `tests/ci-verdict.test.mjs` の「画面のラベルが判定の語彙を網羅している」が
+`index.html` のソースからキーを拾って落とす（拾えないときは fail-closed で落とす）。
+**知らない結論だけは列挙できないので「CI 情報なし」へ落ちる** — これは正直な劣化。
+
+**run 単位では名前を見ない。** 「どのワークフローか」の絞り込みはワークフロー定義の
+name / path（`isCiWorkflow`）で済んでおり、run 単位で再判定しても防御は増えない一方、
+**`run.name` はワークフローの `run-name:` で上書きできる**ため失敗する経路だけが増える
+（実測: `run-name:` にコミットメッセージを出しているリポジトリでは、メッセージが
+`fix(deploy): …` の日だけ `EXCLUDE_RE` に当たって正規の CI run が全滅する）。
+`isCiRun` が見るのは起動イベント（`workflow_run` かどうか）だけにしてある。
+
+**ユニットテストは `npm run test:unit`（`node --test`。追加依存なし）で、CI は
+`html-validate` ジョブの中で走らせる。** 専用ジョブを足さないのは、**ジョブ名が必須
+ステータスチェックの登録名**で、登録されていない新しいジョブは赤くてもマージを止められない
+ため（止まらない検査は検査として機能しない）。`node --test` にパスを直接渡さず
+`scripts/run-unit-tests.mjs` を通すのは、**対象ファイルが 1 件も無いとき `node --test` が
+「テスト 0 件」で終了コード 0 を返す**（実測）ため——テストを消す・改名する・移すだけで
+CI が緑のまま検査が 1 つも走らない状態になる。
+
+**残っている境界**（いずれも「誤った値を出す」側ではなく「判定を出せない」側へ倒れる）:
+
+- **`CI_NAME_RE` / `EXCLUDE_RE` は結局のところ名前のパターン。** 「どのワークフローが CI か」を
+  機械的に知る方法は無いので、これらに当たらない名前の CI は見えないまま `CI 情報なし` になる。
+  追跡対象を増やすときは、そのリポジトリのワークフロー名がパターンに当たるかを手で確かめる。
+- **`workflow_run` で起動する CI は見えない。** 後続ワークフローを除外する代償で、
+  「CI 本体を `workflow_run` で動かす」構成のリポジトリでは判定が出ない。現在の追跡対象には
+  無いので受け入れている（必要になったら、除外の条件を名前ではなく別の手がかりへ変える）。
+- **`COMMIT_LOOKBACK` 件より深く遡らない。** それを超えると `CI 情報なし` になるが、
+  これは「判定が無い」という事実を正しく出している状態なので誤りではない。
+- **バッジが最新になるかは別の問題。** 判定を直しても、`data/portfolio.json` の自動更新が
+  止まっているあいだサイトの値は古いまま（上の「自動更新は設定待ちで止まっている」を参照）。
+- **ユニットテストが固定しているのは選び方だけで、GitHub API の応答の形は固定していない。**
+  上流がフィールド名を変えたら、テストは緑のまま判定が空になる（`CI 情報なし` へ倒れる）。
 
 ### デザイン規約（§6 の一元管理を具体化）
 

@@ -72,6 +72,16 @@ jobs:
       - name: Validate HTML
         run: npx html-validate "**/*.{html,htm}"
 
+      # **ユニットテストをこのジョブで走らせる理由。** `data/portfolio.json` の CI バッジが
+      # 何を名乗るかを決める判定は `scripts/lib/ci-verdict.cjs` にあり、間違えるとサイトが
+      # 事実と違うことを主張する（実測の内訳は同モジュールの冒頭と CLAUDE.md §3）。
+      # 専用ジョブを足さないのは、**ジョブ名が必須ステータスチェックの登録名**で、
+      # 登録されていない新しいジョブは赤くてもマージを止められないため——止まらない
+      # 検査は検査として機能しない。このジョブは既に `.nvmrc` の Node と `npm ci` を
+      # 済ませているので、追加コストも無い。
+      - name: Run unit tests
+        run: npm run test:unit
+
   link-check:
     runs-on: ubuntu-latest
     # リンクチェックはリポジトリの読み取りのみ必要

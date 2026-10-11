@@ -24,7 +24,7 @@
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'sha256-IgSlVLg+beUan9BR6iLQTDG3Bre2cfko7BP1tqxcJ7w='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'"
+      content="default-src 'self'; script-src 'self' 'sha256-zmgRQoULJbWQ9k5ANzPXc6Vbz7RYF15ci/XxNe8eIp8='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'"
     />
     <meta name="referrer" content="strict-origin-when-cross-origin" />
 
@@ -2113,6 +2113,10 @@
           timed_out: { cls: "is-failure", label: "CI タイムアウト" }, // 制限時間を超えた場合
           in_progress: { cls: "is-running", label: "CI 実行中" }, // まだ実行中の場合
           skipped: { cls: "", label: "CI スキップ" }, // ジョブがスキップされた場合
+          startup_failure: { cls: "is-failure", label: "CI 起動失敗" }, // ワークフローが不正で 1 ジョブも起動しなかった場合
+          action_required: { cls: "is-failure", label: "CI 要対応" }, // 人の操作を待って止まっている場合
+          stale: { cls: "", label: "CI 結果が無効" }, // 実行結果が無効になった場合
+          neutral: { cls: "", label: "CI 中立" }, // 合格でも不合格でもなく終わった場合
           none: { cls: "", label: "CI 情報なし" }, // CI 情報がない・未走行の場合
         });
 
@@ -2181,12 +2185,20 @@
           // --- CI 状態バッジ（本物の実行 URL へリンク） ---
           const ci = repo.ci || {}; // CI 情報（無い場合に備える）
           const ciMeta = CI_LABELS[ci.status] || CI_LABELS.none; // 状態に対応する色/ラベル
+          // **判定が最新コミット以外に対するものなら、どのコミットの結果かを必ず添える。**
+          // この自己証明データを更新するワークフロー自身の push は GITHUB_TOKEN で行われ、
+          // GitHub の仕様で他のワークフローを起動しないため、既定ブランチの先頭コミットに
+          // CI の run が 1 つも無い日がある。そこで 1 つ前のコミットまで遡って判定を出すが、
+          // 黙って出すと「最新コミットが緑」という事実と違う主張になる（以前はここで諦めて
+          // 「CI 情報なし」を出していた。経緯と実測は CLAUDE.md §3）
+          const ciLabel =
+            ci.sha7 && ci.is_head === false ? ciMeta.label + "（" + ci.sha7 + " 時点）" : ciMeta.label;
           if (ci.run_url) {
             // 実行 URL があれば監査可能なリンクバッジにする
-            container.appendChild(makeLinkBadge(ciMeta.label, ci.run_url, ciMeta.cls));
+            container.appendChild(makeLinkBadge(ciLabel, ci.run_url, ciMeta.cls));
           } else {
             // URL が無い（未走行など）場合はリンク無しのバッジ
-            container.appendChild(makeSpanBadge(ciMeta.label, ciMeta.cls));
+            container.appendChild(makeSpanBadge(ciLabel, ciMeta.cls));
           }
 
           // --- 最終コミットバッジ（本物のコミット URL へリンク） ---

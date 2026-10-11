@@ -28,6 +28,8 @@ const RESUME_SECTION_TITLES: ReadonlyArray<string> = [
 const WORK_CARD_COUNT = 5;
 // data/portfolio.json からライブバッジを描画するカード (data-repo-key 付き) の枚数
 const PROOF_CARD_COUNT = 3;
+// ライブバッジを描画するカードの data-repo-key（フィクスチャを index.html と対応させるため）
+const PROOF_FIXTURE_KEYS: ReadonlyArray<string> = ["helpdesk-hub", "incident-insight", "AI-Docker-Environment"];
 // モバイル表示の検証に使うビューポート (CLAUDE.md §A のブレークポイント 768px より狭い幅)
 const MOBILE_VIEWPORT = { width: 375, height: 667 };
 
@@ -191,6 +193,72 @@ test.describe("index.html の Works セクション", () => {
       // (toHaveText は自動リトライするため fetch の完了待ちを兼ねる)
       await expect(firstBadge).toHaveText(/^CI /);
     }
+  });
+});
+
+test.describe("index.html の CI バッジの出どころ表示", () => {
+  // **実データではなくフィクスチャで固定する。** data/portfolio.json は毎日書き換わるので、
+  // 「判定が最新コミット以外のときだけ出どころを添える」という規則を実データで検証すると、
+  // その日の中身次第でテストが何も確かめない日ができてしまう。
+  // ここでは 3 枚のカード全部に同じ ci を持たせ、1 枚目だけ run_url を持たせる
+  // （リンクバッジと span バッジで**別々の分岐**を通るため、片方だけ直す変更を落とすため）。
+  function portfolioFixture(ci: Record<string, unknown>) {
+    return {
+      generated_at: "2026-10-11T00:00:00.000Z", // 最終検証日時（表示されるだけ）
+      repos: PROOF_FIXTURE_KEYS.map((key, i) => ({
+        key, // index.html の data-repo-key と対応させる
+        name: key, // カード名（この検証では使わない）
+        url: "", // カードの GitHub リンクは静的マークアップ側にあるので空で良い
+        // 1 枚目だけリンクバッジの分岐を通す。URL は実在するものにしておく
+        // （CI の link-check がリポジトリ配下の平文ファイルを走査して実際に叩くため）
+        ci: { branch: "main", run_url: i === 0 ? "https://github.com/izumacha/profile-portfolio" : "", ...ci },
+        last_commit: { iso: "2026-10-10T00:00:00Z", sha7: "1111111", url: "" }, // 最終コミット
+        languages: ["TypeScript"], // 主要言語
+        test_file_count: 1, // テスト数（表示されるだけ）
+        stale: false, // 前回値保持ではない
+      })),
+      site_quality: { lighthouse: null, visual_regression: null, links: null, html_validate: null },
+    };
+  }
+
+  // portfolio.json を差し替えてからトップページを開く
+  async function gotoWithCi(page: Page, ci: Record<string, unknown>): Promise<void> {
+    // 静的 JSON の取得をフィクスチャで置き換える（fetch("data/portfolio.json") に当たる）
+    await page.route("**/data/portfolio.json", (route) =>
+      route.fulfill({ contentType: "application/json", body: JSON.stringify(portfolioFixture(ci)) }),
+    );
+    // 差し替えを有効にしたうえでページを開く
+    await page.goto("/index.html");
+  }
+
+  // 3 枚のライブバッジカードの先頭バッジ（CI バッジ）をまとめて取り出す
+  function ciBadges(page: Page) {
+    return page.locator(".work-card[data-repo-key] [data-proof] .proof-badge:first-child");
+  }
+
+  test("判定が最新コミット以外ならどのコミットの結果かを添える", async ({ page }) => {
+    // 1 つ前のコミットに対する成功判定（updater 自身の push で先頭コミットに CI が無い日の形）
+    await gotoWithCi(page, { status: "success", sha7: "abc1234", is_head: false });
+    // 3 枚すべてで出どころが添えられていることを確認する（リンク／span の両分岐を通る）
+    await expect(ciBadges(page)).toHaveCount(PROOF_CARD_COUNT);
+    for (let i = 0; i < PROOF_CARD_COUNT; i++) {
+      // 「CI 成功（abc1234 時点）」の形になっていることを確認する
+      await expect(ciBadges(page).nth(i)).toHaveText("CI 成功（abc1234 時点）");
+    }
+  });
+
+  test("判定が最新コミットのものなら何も添えない", async ({ page }) => {
+    // 先頭コミットそのものに対する成功判定
+    await gotoWithCi(page, { status: "success", sha7: "abc1234", is_head: true });
+    // 余計な注記が付いていないことを確認する
+    await expect(ciBadges(page).first()).toHaveText("CI 成功");
+  });
+
+  test("出どころの項目が無い古いデータでも何も添えない", async ({ page }) => {
+    // sha7 / is_head を持たない以前の形の JSON（移行中に両方が並ぶため）
+    await gotoWithCi(page, { status: "success" });
+    // 「CI 成功（undefined 時点）」のような壊れた表示にならないことを確認する
+    await expect(ciBadges(page).first()).toHaveText("CI 成功");
   });
 });
 

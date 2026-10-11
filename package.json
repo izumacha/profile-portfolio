@@ -2,6 +2,7 @@
   "name": "profile-portfolio",
   "private": true,
   "scripts": {
+    "test:unit": "node scripts/run-unit-tests.mjs",
     "test:lighthouse": "lhci autorun",
     "test:e2e": "playwright test",
     "capture:screenshots": "node scripts/capture-screenshots.mjs"

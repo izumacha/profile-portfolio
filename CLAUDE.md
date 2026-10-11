@@ -133,37 +133,59 @@ GitHub Pages は HTTP レスポンスヘッダを付けられないため、CSP 
 
 ### `npm audit` の high を据え置いている理由（受け入れの記録）
 
-**`npm audit --audit-level=high` は現在 11 件を報告する**（`moderate` 4 件・`low` 2 件を含めると 17 件。`critical` は 0 件）。
-CI は `npm audit` を流していないので（`ci.yml` の 3 ジョブは html-validate / link-check / visual-regression、
-`lighthouse.yml` が lighthouse）、**この記録が無いと誰も再確認しない** — §9 の「既知脆弱性を定期的に
-確認し、放置しない」を満たすため、据え置きの判断をここに置く。
+**`npm audit --audit-level=high` は high を複数件報告する。** CI は `npm audit` を流していないので
+（`ci.yml` の 3 ジョブは html-validate / link-check / visual-regression、`lighthouse.yml` が
+lighthouse）、**この記録が無いと誰も再確認しない** — §9 の「既知脆弱性を定期的に確認し、放置しない」を
+満たすため、据え置きの判断をここに置く。
 
-**根は 1 つしかない: `@lhci/cli`（Lighthouse CI の CLI）が引き込む依存**で、`moderate` / `low` の 6 件（`argparse` / `js-yaml` / `sprintf-js` / `uuid` / `external-editor` / `inquirer`）も同じ配下にある。
+**件数と版はここに書かない。** 上の 2 つの注記と同じ理由（§6 DRY）で、**正本は
+`npm audit --audit-level=high` の出力**。dependabot が毎週 minor / patch をまとめて上げるので、
+数字を写すと次の更新で黙って古くなる —— しかもこの記録の前提が「誰も再確認しない」ことなので、
+**古くなったことに誰も気付かない**（helpdesk-hub は散文の数値を定数と突き合わせる検査を持っているが、
+このリポジトリのテストは Playwright の E2E だけで、突き合わせる相手になる定数も無い）。
+**CI へ `npm audit` を足す道は採らない** — 上流に新しい勧告が出ただけで無関係な PR が赤くなり、
+「赤いのが常態になった検査はいずれ緩められる」形になる。各時点の実測はコミットと PR 本文に残す。
 
-| 報告されるパッケージ | 経路 | npm が示す唯一の修正 |
-| --- | --- | --- |
-| `lighthouse` / `puppeteer-core` / `@puppeteer/browsers` / `extract-zip` / `basic-ftp` / `get-uri` / `pac-proxy-agent` / `proxy-agent` / `tmp` / `@lhci/utils`（→ `js-yaml`） | すべて `@lhci/cli` 配下 | `@lhci/cli@0.1.0`（**0.15.1 からの major ダウングレード**。Lighthouse CI が動かなくなる） |
+**根は 1 つしかない: すべて `@lhci/cli`（Lighthouse CI の CLI）配下。** 報告されるパッケージの
+ほとんどは伝播で、**実際の勧告の葉は 3 つ**（`extract-zip` のシンボリックリンクによる任意書き込み・
+`basic-ftp` の一覧解析の二次時間・`tmp` のシンボリックリンク／パストラバーサル）。npm が示す唯一の
+修正は `@lhci/cli@0.1.0`（**major ダウングレード**）で、Lighthouse CI が動かなくなる。`@lhci/cli` は
+既に最新版なので、上げて直す道も無い。
 
-**`@lhci/cli` は既に最新版（0.15.1）で、上げて直す道が無い**（`npm view @lhci/cli version` で確認できる）。
-`npm audit fix` で直るものは済ませてある（`proxy-addr` 2.0.7 → 2.0.8 で critical 1 件、`compression`
-1.8.1 → 1.8.2 で high 1 件、`fast-uri` 3.1.7 → 3.1.8 で moderate 1 件。いずれも推移依存なので
-`package.json` は変わらない）。
+**「上流が puppeteer を上げれば済む」ではない。** `tmp` / `inquirer` / `proxy-agent` / `uuid` は
+**`@lhci/cli` 自身の直接依存**（`node_modules/@lhci/cli/package.json` で確認できる）で、
+`lighthouse` / `puppeteer-core` の下にはいない。**据え置きを解除する条件**は、上流が
+`lighthouse` / `puppeteer-core` を上げ、**かつ自身の `tmp` / `proxy-agent` / `inquirer` / `uuid` も
+上げた版**を出したとき。前者だけでは high は残る（`@lhci/utils` が high なのも `js-yaml` ではなく
+`lighthouse` 経由で、`js-yaml` 単体は moderate にしかならない）。
 
-**なぜ据え置けるのか（helpdesk-hub の同じ記録とは前提が違う）。** `package.json` の `dependencies` は
-**空**で、`@lhci/cli` / `@playwright/test` / `html-validate` の 3 つはすべて devDependency。
-§1 のとおりサイト本体に**ページ生成のビルドステップが無く**、`index.html` / `resume.html` をそのまま
-GitHub Pages が配信するため、**`node_modules` は 1 バイトも配信物に入らない**（helpdesk-hub は
-Dockerfile が実行イメージへ `node_modules` を丸ごとコピーするので、あちらは「本番イメージに同梱される」と
-書いてある。ここはその条件が成り立たない）。
+**実行される場所を小さく書かないこと。** `npm ci` は 4 か所で走る —— `ci.yml` の html-validate と
+**visual-regression（`contents: write`）**、`lighthouse.yml`、**`update-snapshots.yml`
+（`contents: write`）**。後ろの 2 つは push 権を持つ `GITHUB_TOKEN` を握るので、「lighthouse ジョブと
+手元だけ」と書くと**受け入れの前提そのものを実際より小さく見積もる**ことになる。
 
-**「開発時の依存だから無害」と書かないこと。** 正しい言い方は「**配信物には入らないが、CI の
-lighthouse ジョブと開発者の手元では実行される**」。扱う入力はこのリポジトリ自身の静的ファイルと
-`lighthouserc.json` だけで、外部から与えられないため悪用の経路が無い（`tmp` のシンボリックリンク書き込みや
-`extract-zip` のパストラバーサルは、攻撃者が入力を与えられる前提の脆弱性）。
+**「配信物に入らない」は正しいが、それだけを理由にしないこと。** `package.json` の `dependencies` は
+**空**で、`@lhci/cli` / `@playwright/test` / `html-validate` の 3 つはすべて devDependency。§1 の
+とおりサイト本体に**ページ生成のビルドステップが無く**、`index.html` / `resume.html` をそのまま
+GitHub Pages が配信するため、**`node_modules` は 1 バイトも配信物に入らない**（helpdesk-hub の同じ
+記録は Dockerfile が実行イメージへ `node_modules` を丸ごとコピーするので「本番イメージに同梱される」と
+書いてある。**前提が違う**）。
 
-**据え置きを解除する条件**: 上流 `@lhci/cli` が `lighthouse` / `puppeteer-core` を上げた版を出したとき。
-**確認は `npm audit --audit-level=high`。** `overrides` で推移依存を跨ぐ手もあるが、Lighthouse CI は
-puppeteer の内部 API に結び付くので、入れるなら `npm run test:lighthouse` が通ることを必ず確認する。
+**「外部から入力が来ない」とも書かないこと（実測で誤り）。** `lhci autorun` が開く `index.html` は
+`fonts.googleapis.com` の CSS と `fonts.gstatic.com` の woff2 を取り、`data/portfolio.json`
+（`update-portfolio-data.yml` が GitHub API の応答から生成する**自動生成物**）を fetch する。
+`lighthouserc.json` の `upload.target` は `temporary-public-storage` なので、レポートを外部へ POST して
+応答を読む。**据え置ける理由は「外部入力が無いこと」ではなく、3 つの葉が要求する入力がどれも攻撃者の
+手に無いこと**: `extract-zip` / `basic-ftp` はブラウザ書庫の取得・展開と FTP / PAC プロキシの経路
+（取得元はベンダー自身の CDN で、PAC も FTP プロキシも設定していない）、`tmp` は呼び出し側が渡す
+`dir` / `prefix` / `postfix`（lhci が自分の定数を渡す）。
+
+**`@lhci/cli` をロックファイルから外す道も検討した（採らない）。** Lighthouse CI を SHA ピンの action
+として走らせれば依存の木ごと消え、4 か所の `npm ci` から外れる。採らないのは、§2 が
+`npm run test:lighthouse` を「CI と同じコマンドをローカルで流す」手段として案内しており、その再現性を
+ロックファイルが支えているため —— **依存を消す代わりにローカル検証の手段を失う**。`overrides` で推移
+依存を跨ぐ案と並べて宿題にしてある（どちらを採るにしても Lighthouse CI は puppeteer の内部 API に
+結び付くので、`npm run test:lighthouse` が通ることを必ず確認する）。
 
 ### セクション追加時のチェックリスト
 

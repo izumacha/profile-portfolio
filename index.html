@@ -24,7 +24,7 @@
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'sha256-m++uKBjIyA6+8I2V/S8jJlDImCJFxY6BaihQYPYj5bg='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'"
+      content="default-src 'self'; script-src 'self' 'sha256-zmgRQoULJbWQ9k5ANzPXc6Vbz7RYF15ci/XxNe8eIp8='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'"
     />
     <meta name="referrer" content="strict-origin-when-cross-origin" />
 
@@ -2113,6 +2113,10 @@
           timed_out: { cls: "is-failure", label: "CI タイムアウト" }, // 制限時間を超えた場合
           in_progress: { cls: "is-running", label: "CI 実行中" }, // まだ実行中の場合
           skipped: { cls: "", label: "CI スキップ" }, // ジョブがスキップされた場合
+          startup_failure: { cls: "is-failure", label: "CI 起動失敗" }, // ワークフローが不正で 1 ジョブも起動しなかった場合
+          action_required: { cls: "is-failure", label: "CI 要対応" }, // 人の操作を待って止まっている場合
+          stale: { cls: "", label: "CI 結果が無効" }, // 実行結果が無効になった場合
+          neutral: { cls: "", label: "CI 中立" }, // 合格でも不合格でもなく終わった場合
           none: { cls: "", label: "CI 情報なし" }, // CI 情報がない・未走行の場合
         });
 

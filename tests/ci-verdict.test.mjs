@@ -6,6 +6,7 @@
 // 「直したつもりで直っていない」状態をテストが素通りできないようにしている。
 import { describe, it } from "node:test"; // Node 同梱のテストランナー
 import assert from "node:assert/strict"; // Node 同梱の表明（厳密比較）
+import { readFileSync } from "node:fs"; // index.html のソースからラベルの語彙を拾うために使う
 import ciVerdict from "../scripts/lib/ci-verdict.cjs"; // 検査対象（CommonJS を既定 import で読む）
 
 const {
@@ -97,7 +98,7 @@ describe("ワークフローと run の選別", () => {
 });
 
 describe("判定の選び方", () => {
-  it("後続ワークフローの skipped に負けず CI の success を名乗る（出荷されていた誤り 54 件）", () => {
+  it("後続ワークフローの skipped に負けず CI の success を名乗る（出荷されていた誤り (1)）", () => {
     const verdict = pickVerdict(AI_DOCKER_RUNS); // 実データで判定する
     assert.deepEqual(verdict, {
       status: "success",
@@ -105,7 +106,7 @@ describe("判定の選び方", () => {
     });
   });
 
-  it("後続ワークフローの failure も CI の判定として採らない（出荷されていた誤り 2 件）", () => {
+  it("後続ワークフローの failure も CI の判定として採らない（出荷されていた誤り (1)）", () => {
     const runs = [
       run({
         name: "Post-CI Verification",
@@ -124,7 +125,19 @@ describe("判定の選び方", () => {
     assert.equal(pickVerdict([]), null); // run が無い
     assert.equal(pickVerdict([run({ conclusion: "skipped" })]), null); // skipped だけ
     assert.equal(pickVerdict([run({ conclusion: "neutral" })]), null); // neutral だけ
-    assert.equal(pickVerdict([run({ name: "Deploy", path: ".github/workflows/deploy.yml" })]), null); // CI でない
+    // 「CI でないワークフロー」を弾くのは pickVerdict ではなく collectCiRuns の役目
+    // （run 単位で名前を見ると `run-name:` の上書きで正規の CI が全滅するため。下の検証を参照）
+    assert.equal(pickVerdict([run({ event: "workflow_run" })]), null); // 後続ワークフローだけ
+  });
+
+  it("run 単位では名前を見ない（run-name: の上書きで CI が全滅しないこと）", () => {
+    // `run-name:` でコミットメッセージを出しているリポジトリの形。
+    // 名前は EXCLUDE_RE に当たるが、ワークフロー定義側は CI なので判定は生きる
+    const renamed = run({ name: "fix(deploy): ページの崩れを直す" });
+    assert.equal(isCiRun(renamed), true); // run 単位では除外しない
+    assert.equal(pickVerdict([renamed]).status, "success"); // 判定も失われない
+    // 一方でワークフロー定義側（name / path）の判定は従来どおり効く
+    assert.equal(isCiWorkflow({ name: "Deploy", path: ".github/workflows/deploy.yml" }), false);
   });
 
   it("CI が複数ある日は最も悪いものを名乗る（新しい成功で赤を打ち消さない）", () => {
@@ -162,6 +175,35 @@ describe("判定の選び方", () => {
   });
 });
 
+describe("画面のラベルが判定の語彙を網羅している", () => {
+  // **判定が JSON へ書ける status には、必ず index.html のラベルがある必要がある。**
+  // index.html の `CI_LABELS` は未知のキーを `none`（「CI 情報なし」）へ落とすので、
+  // ラベルを足し忘れると**fail-closed で選んだ悪い判定が中立の「CI 情報なし」として
+  // 描画される**（緑が警告ではなく「情報なし」へ退行し、しかも実行ページへのリンクは
+  // 付いたまま「情報が無い」と主張する）。CLAUDE.md §6 の「新しい値を追加したら
+  // 参照元をすべて更新する」を機械的に要求する。
+  //
+  // index.html のインライン script は import できないので、**ソースからキーを拾う**。
+  // 拾えなかった場合は「違反ゼロ」ではなく前提が崩れた状態なので落とす（fail-closed）。
+  const html = readFileSync(new URL("../index.html", import.meta.url), "utf8"); // 画面のソースを読む
+  const block = html.match(/const CI_LABELS = Object\.assign\(Object\.create\(null\), \{([\s\S]*?)\n\s*\}\);/); // 対応表のブロック
+  const labelKeys = block ? [...block[1].matchAll(/^\s*([A-Za-z_][A-Za-z0-9_]*):/gm)].map((m) => m[1]) : [];
+
+  it("検査が空回りしていない（前提の確認）", () => {
+    // ブロックが読めなかった・キーが拾えなかったのは「全部ある」ではなく「何も見ていない」
+    assert.ok(block, "index.html の CI_LABELS のブロックを読み取れない（書き方を変えたらこの正規表現も直す）");
+    assert.ok(labelKeys.includes("success") && labelKeys.includes("none"), "既知のキーを拾えていない");
+  });
+
+  it("判定が名乗りうる status すべてにラベルがある", () => {
+    // 名乗りうるのは優先順位表の綴り（目印を除く）＋判定が無いときの none。
+    // 知らない結論はそもそも列挙できないので「CI 情報なし」へ落ちる（正直な劣化）
+    const expected = [...STATUS_PRECEDENCE.filter((x) => x !== UNKNOWN_STATUS), "none"];
+    const missing = expected.filter((x) => !labelKeys.includes(x));
+    assert.deepEqual(missing, [], `index.html の CI_LABELS に不足しているキー: ${missing.join(", ")}`);
+  });
+});
+
 describe("run の集め方", () => {
   const SHA = "b".repeat(40); // 対象コミット
   // helpdesk-hub の実測: 同一 sha に 90 件の run があり、うち 77 件が schedule の sla-reminders、
@@ -172,7 +214,7 @@ describe("run の集め方", () => {
     { id: 3, name: "Post-CI Verification", path: ".github/workflows/post-ci-verify.yml" },
   ];
 
-  it("schedule の大量 run に押し出されず CI の run を拾う（出荷されていた誤り 7 件）", async () => {
+  it("schedule の大量 run に押し出されず CI の run を拾う（出荷されていた誤り (2)）", async () => {
     const asked = []; // どのワークフローを引いたか
     const listWorkflowRuns = async ({ workflow_id, sha }) => {
       asked.push(workflow_id); // 問い合わせを記録する
@@ -192,6 +234,19 @@ describe("run の集め方", () => {
     assert.deepEqual(pickVerdict(runs), { status: "success", run_url: "RUN_URL(7)" });
   });
 
+  it("CI でないワークフローの run は 1 件も混ざらない（絞り込みはこの層の責務）", async () => {
+    // すべてのワークフローが run を返す状況でも、CI でないものは問い合わせ自体が起きない
+    const listWorkflowRuns = async ({ workflow_id, sha }) => [
+      run({ head_sha: sha, name: `wf${workflow_id}`, path: `.github/workflows/wf${workflow_id}.yml` }),
+    ];
+    const workflows = [
+      { id: 1, name: "CI", path: ".github/workflows/ci.yml" }, // CI
+      { id: 9, name: "Deploy", path: ".github/workflows/deploy.yml" }, // CI でない
+    ];
+    const runs = await collectCiRuns({ workflows, listWorkflowRuns, sha: SHA });
+    assert.equal(runs.length, 1); // CI のワークフロー 1 本ぶんだけ
+  });
+
   it("表示中コミット以外の run は捨てる（古い緑を貼らない二重防御）", async () => {
     const listWorkflowRuns = async () => [run({ head_sha: "c".repeat(40) })]; // API が sha を無視した想定
     const runs = await collectCiRuns({ workflows: WORKFLOWS, listWorkflowRuns, sha: SHA });
@@ -205,7 +260,7 @@ describe("判定が付いたコミットまで遡る", () => {
   const PREV = "2".repeat(40); // その 1 つ前（CI が走っている）
   const COMMITS = [{ sha: HEAD }, { sha: PREV }]; // 新しい順
 
-  it("先頭コミットに CI が無ければ遡り、どのコミットの判定かを返す（出荷されていた誤り 29 件）", async () => {
+  it("先頭コミットに CI が無ければ遡り、どのコミットの判定かを返す（出荷されていた誤り (3)）", async () => {
     const listWorkflowRuns = async ({ sha }) =>
       sha === PREV ? [run({ head_sha: PREV, html_url: "RUN_URL(8)" })] : [];
     const verdict = await resolveCiVerdict({ commits: COMMITS, workflows: WORKFLOWS, listWorkflowRuns });
@@ -222,6 +277,18 @@ describe("判定が付いたコミットまで遡る", () => {
     const verdict = await resolveCiVerdict({ commits: COMMITS, workflows: WORKFLOWS, listWorkflowRuns });
     assert.equal(verdict.sha7, HEAD.slice(0, 7));
     assert.equal(verdict.is_head, true);
+  });
+
+  it("COMMIT_LOOKBACK より深く遡らない（API 呼び出しが無制限にならない）", async () => {
+    // 呼び出し側が上限を超える件数を渡しても、関数の側で打ち切る
+    const many = Array.from({ length: COMMIT_LOOKBACK + 20 }, (_, i) => ({ sha: String(i).padStart(40, "0") }));
+    const seen = new Set(); // 問い合わせたコミット
+    const listWorkflowRuns = async ({ sha }) => {
+      seen.add(sha); // 何件のコミットを見たかを記録する
+      return []; // どのコミットにも判定は無い
+    };
+    assert.equal(await resolveCiVerdict({ commits: many, workflows: WORKFLOWS, listWorkflowRuns }), null);
+    assert.equal(seen.size, COMMIT_LOOKBACK); // 上限ぶんしか問い合わせない
   });
 
   it("遡っても判定が無ければ null（古い run を流用しない）", async () => {

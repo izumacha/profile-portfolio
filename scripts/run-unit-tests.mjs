@@ -23,4 +23,7 @@ if (files.length === 0) {
 
 console.log(`ユニットテスト ${files.length} ファイルを実行します`); // 何件走るかを必ず出す（0 件を見逃さないため）
 const result = spawnSync(process.execPath, ["--test", ...files], { stdio: "inherit" }); // いま動いている Node でそのまま実行する
+// 子プロセスを起動できなかった場合（EACCES / EMFILE / ENOMEM など）は status が null で
+// 理由が error にしか入らない。黙って非ゼロ終了すると「テストが落ちた」と区別できないので必ず出す（§6）
+if (result.error) console.error("テストランナーを起動できませんでした:", result.error);
 process.exit(result.status === null ? 1 : result.status); // シグナルで落ちた場合（status が null）も失敗として扱う

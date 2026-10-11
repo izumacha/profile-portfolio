@@ -46,6 +46,7 @@ const UNKNOWN_STATUS = "(unknown)";
 // （GitHub が将来新しい結論を増やしたとき、それが success に打ち消されて消えないように）。
 const STATUS_PRECEDENCE = [
   "failure", // 失敗
+  "startup_failure", // ワークフローファイルが不正で 1 ジョブも起動しなかった（ハード障害）
   "timed_out", // 制限時間超過
   "action_required", // 人の操作待ち（止まっている）
   "cancelled", // 中止
@@ -67,15 +68,25 @@ function isCiWorkflow(workflow) {
   return CI_NAME_RE.test(name) || CI_NAME_RE.test(path); // どちらかが CI のパターンに当たれば採用
 }
 
-// 1 件の run が「CI の判定として読んでよい run」かを判定する
+// 1 件の run が「CI の判定として読んでよい run」かを判定する。
+//
+// **見るのは起動イベントだけ。** 「どのワークフローか」の絞り込みは `collectCiRuns` が
+// `isCiWorkflow`（ワークフロー定義の name / path）で済ませており、ここで name / path を
+// 再判定しても防御は増えない一方、**失敗する経路だけが増える**:
+// `run.name` はワークフローの `run-name:` で上書きできるため、たとえば
+// `run-name: ${process.env.NONE ?? ""}<コミットメッセージ>` のような設定にしている
+// リポジトリでは、コミットメッセージが `fix(deploy): …` の日だけ EXCLUDE_RE に当たって
+// **正規の CI run が全滅する**（実測で確認）。名前でだけ CI と判定されるワークフロー
+// （`name: "Lighthouse CI"` / `path: .github/workflows/perf.yml` 等）に `run-name:` を
+// 付けた場合も同じく全滅する。
+//
+// **CI を追いかける後続ワークフローは CI ではない。** `workflow_run` で起動する run は
+// 定義上 CI の完了後に作られるので、時刻で選ぶとこちらが必ず勝つ（上の (1)）。
+// 名前で `verify` を禁じる手は採らない — 本物の CI が verify を名乗る権利を奪うし、
+// 後続ワークフローの名前は repo ごとに違うので綴りを足し続けることになる。
 function isCiRun(run) {
   if (!run) return false; // 値が無ければ対象外
-  // **CI を追いかける後続ワークフローは CI ではない。** `workflow_run` で起動する run は
-  // 定義上 CI の完了後に作られるので、時刻で選ぶとこちらが必ず勝つ（上の (1)）。
-  // 名前で `verify` を禁じる手は採らない — 本物の CI が verify を名乗る権利を奪うし、
-  // 後続ワークフローの名前は repo ごとに違うので綴りを足し続けることになる。
-  if (run.event === "workflow_run") return false; // 後続ワークフローの run は除外
-  return isCiWorkflow({ name: run.name, path: run.path }); // 名前／パスの条件はワークフローと共通
+  return run.event !== "workflow_run"; // 後続ワークフローの run だけを除外する
 }
 
 // run から「表示する状態」を取り出す。判定が無い run には null を返す
@@ -111,6 +122,13 @@ function pickVerdict(runs) {
 // 1 コミット分の CI run を、CI のワークフローごとに引いて集める。
 // **リポジトリ全体の最新 run を引かない**のが要点（上の (2)）。schedule で何千件走る
 // ワークフローがあっても、ワークフロー単位で引けば CI の run が押し出されることがない。
+// **受け入れている無駄**: `workflow_run` でしか起動しないワークフロー（後続の検証など）も
+// CI の名前パターンに当たれば毎回 1 回問い合わせ、返ってきた run は `isCiRun` が全部捨てる。
+// 避けるには (a) 許可するイベント名を列挙して `listWorkflowRuns` に渡すか、(b) ワークフローの
+// 起動条件を知る必要があるが、(a) は「名前のパターン」と同じ取りこぼしの罠を別の軸で作り直す
+// ことになり（`push` / `pull_request` / `schedule` / `workflow_dispatch` / `merge_group` …を
+// 数え上げ、漏れたイベントで走る CI が見えなくなる）、(b) は `listRepoWorkflows` が返さない。
+// 代償は 1 ワークフロー × 1 コミットあたり 1 往復なので、そのまま受け入れる。
 async function collectCiRuns({ workflows, listWorkflowRuns, sha }) {
   const collected = []; // 集めた run
   for (const workflow of workflows || []) {
@@ -129,7 +147,10 @@ async function collectCiRuns({ workflows, listWorkflowRuns, sha }) {
 // 返り値の sha7 / is_head が「どのコミットの判定か」を持つので、呼び出し側（画面）は
 // 古い判定を最新コミットの判定として黙って出すことがない（上の (3)）。
 async function resolveCiVerdict({ commits, workflows, listWorkflowRuns }) {
-  const list = commits || []; // コミット一覧（新しい順）
+  // **遡る深さはこの関数が守る。** 呼び出し側の per_page に任せると、listCommits を
+  // ページングする・別の呼び出し側を足すだけで API 呼び出しが無制限になる
+  // （COMMIT_LOOKBACK の説明が指す性質はこちら側にあるので、上限もこちらに置く）
+  const list = (commits || []).slice(0, COMMIT_LOOKBACK); // コミット一覧（新しい順）を上限まで
   if (list.length === 0) return null; // コミットが無ければ判定なし
   const headSha = list[0].sha; // 表示中の最新コミット
   for (const commit of list) {

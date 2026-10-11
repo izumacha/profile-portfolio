@@ -214,10 +214,8 @@ test.describe("index.html の CI バッジの出どころ表示", () => {
         ci: { branch: "main", run_url: i === 0 ? "https://github.com/izumacha/profile-portfolio" : "", ...ci },
         last_commit: { iso: "2026-10-10T00:00:00Z", sha7: "1111111", url: "" }, // 最終コミット
         languages: ["TypeScript"], // 主要言語
-        test_file_count: 1, // テスト数（表示されるだけ）
         stale: false, // 前回値保持ではない
       })),
-      site_quality: { lighthouse: null, visual_regression: null, links: null, html_validate: null },
     };
   }
 

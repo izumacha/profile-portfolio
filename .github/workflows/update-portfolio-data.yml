@@ -255,29 +255,6 @@ jobs:
                 degraded = true;
               }
 
-              // 既定ブランチの Git ツリーを再帰取得し、テストらしきファイル数を概算する
-              let test_file_count = null;
-              try {
-                const tree = await github.rest.git.getTree({
-                  owner: t.owner,
-                  repo: t.repo,
-                  tree_sha: branch,
-                  recursive: "true",
-                });
-                // パスに test/spec を含むファイル（blob）を数える。簡易ヒューリスティック
-                const re = /(^|\/)(tests?|e2e|__tests__)\//i;
-                const re2 = /\.(test|spec)\.[a-z]+$/i;
-                test_file_count = tree.data.tree.filter(
-                  (n) => n.type === "blob" && (re.test(n.path) || re2.test(n.path)),
-                ).length;
-              } catch (e) {
-                // null のまま返すとテスト数バッジが消え、「テストが無いリポジトリ」と
-                // 見分けられなくなるため、前回値を保つ
-                core.warning(`${t.key}: tree 取得失敗: ${e.message}`);
-                test_file_count = prevRepo.test_file_count ?? null;
-                degraded = true;
-              }
-
               return {
                 key: t.key,
                 name: prevRepo.name || t.repo,
@@ -285,7 +262,6 @@ jobs:
                 ci,
                 last_commit,
                 languages,
-                test_file_count,
                 // 一部でも取得できていない日を「検証できた日」と同じ見た目にしない。
                 // 取得全体が失敗したときに呼び出し側が立てるのと同じ目印を、
                 // 項目ごとの失敗にも広げる（index.html では「（更新待ち）」の表示になる）
@@ -306,16 +282,15 @@ jobs:
               }
             }
 
-            // 新しい JSON を組み立てる。site_quality は前回値を引き継ぐ（本ワークフローでは更新しない）
+            // 新しい JSON を組み立てる。
+            // **誰も読まない項目は収集しない**（§6 デッドコードを残さない）。以前はここに
+            // `site_quality`（4 つとも null のまま誰も書かず誰も読まない）があり、
+            // リポジトリごとに `test_file_count`（既定ブランチの**再帰**ツリーを毎日 4 回
+            // 取得して数えていたが、画面にも README にも出していない）があった。
+            // 表示したくなったら、画面側の表示と同じ変更セットで戻すこと。
             const out = {
               generated_at: new Date().toISOString(),
               repos,
-              site_quality: prev.site_quality || {
-                lighthouse: null,
-                visual_regression: null,
-                links: null,
-                html_validate: null,
-              },
             };
 
             // 末尾改行付きで書き戻す

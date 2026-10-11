@@ -82,6 +82,36 @@ GIF 化に `ffmpeg` を使うため事前にインストールしておく。ブ
 | `scripts/lib/chromium-launch-options.mjs` | Chromium 実行ファイルの差し替え（`PLAYWRIGHT_CHROMIUM_PATH`）を組み立てる共有ヘルパー（撮影と E2E で共用） |
 | `docs/screenshots/` | README 掲載用のスクリーンショットとデモ GIF（自動生成物） |
 
+### `data/portfolio.json` の自動更新は設定待ちで止まっている（実測の記録）
+
+**`update-portfolio-data.yml` は毎日走って毎日失敗する。** 原因は実行ログで確定していて、
+PR 作成の 1 行:
+
+```
+pull request create failed: GraphQL: GitHub Actions is not permitted to
+create or approve pull requests (createPullRequest)
+```
+
+更新ブランチ `automation/update-portfolio-data` への push までは成功しているので、**データは
+作られていて取り込まれないだけ**。生成日時が 2 日以上古いとワークフロー自身が赤で終わる
+（成果物の側から見る検知なので、手配が緑でもデータが止まっていれば気付ける設計）。
+
+**直せるのはリポジトリの所有者だけで、しかも 2 つのうち片方では足りない。**
+
+| 対処 | 足りるか |
+| --- | --- |
+| リポジトリ設定「Allow GitHub Actions to create and approve pull requests」を有効にする | **足りない** |
+| `PAGES_DEPLOY_TOKEN` に PAT / GitHub App トークン（`contents: write` ＋ `pull-requests: write`）を入れる | 足りる |
+
+**前者だけでは PR が作られても必須チェックが走らない。** `GITHUB_TOKEN` が起こしたイベントは
+他のワークフローを起動しないため、`ci.yml` の 3 ジョブと `lighthouse.yml` が 1 つも始まらず、
+予約した auto-merge は条件待ちのまま永久に成立しない（ワークフロー側もこの条件を検知して
+`::warning::` で名指しする）。**全自動で完結させる道は `PAGES_DEPLOY_TOKEN` の設定だけ。**
+
+**設定を入れない運用も成り立つ**（push 済みのブランチから人が PR を出して通せば取り込まれる。
+2026-10 の停止は実際にその手順で解消した）。その場合は毎日の赤を「取り込み待ちの合図」として
+扱うことになるので、**どちらで運用するかを決めてここへ書き足すこと。**
+
 ### デザイン規約（§6 の一元管理を具体化）
 
 - 色の変更は `:root` の CSS 変数（`--primary`, `--accent`, `--bg-dark` 等）を通じて行う。個別要素に直接カラーコードを書かない。ダークテーマ既定値: `--bg-dark: #0f172a`, `--primary: #6366f1`, `--accent: #22d3ee`。

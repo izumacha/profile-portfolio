@@ -24,7 +24,7 @@
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'sha256-zmgRQoULJbWQ9k5ANzPXc6Vbz7RYF15ci/XxNe8eIp8='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'"
+      content="default-src 'self'; script-src 'self' 'sha256-elAzYvc6jwEPXpgDo9ra2GuxEH3BqLnBzrAITd6vv+g='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'"
     />
     <meta name="referrer" content="strict-origin-when-cross-origin" />
 
@@ -2216,6 +2216,14 @@
           // --- 主要言語バッジ（先頭 1 件のみ控えめに表示） ---
           if (Array.isArray(repo.languages) && repo.languages.length > 0) {
             container.appendChild(makeSpanBadge(repo.languages[0], "")); // 最も多い言語を表示
+          }
+
+          // --- テストファイル数バッジ ---
+          // **0 件も表示し、数えられなかったときだけ出さない。** 0 を隠すと「テストが無い」と
+          // 「数えられなかった」が画面で同じに見える（焼き込み側は数えられないとき null を入れる）。
+          // 数え方は scripts/lib/test-file-count.cjs が持ち、切り詰められたツリーでは null になる
+          if (Number.isInteger(repo.test_file_count) && repo.test_file_count >= 0) {
+            container.appendChild(makeSpanBadge("テスト " + repo.test_file_count + " 件", "")); // 件数を表示
           }
 
           // --- 最終検証日時（generated_at）を控えめに添える ---

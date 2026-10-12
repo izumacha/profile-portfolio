@@ -136,6 +136,8 @@ jobs:
             // github-script の `require` はアクション側のディレクトリを基準に解決するため、
             // ワークスペースの絶対パスで読む（公式に案内されている書き方）。
             const ciVerdict = require(`${process.env.GITHUB_WORKSPACE}/scripts/lib/ci-verdict.cjs`);
+            // 「テスト N 件」バッジの数え方。**判定はこのモジュールが持つ**（単体テストで固定）
+            const { countTestFiles } = require(`${process.env.GITHUB_WORKSPACE}/scripts/lib/test-file-count.cjs`);
             // 書き出し先はワークフロー env の DATA_FILE を唯一の参照元にする
             // （後段の差分判定シェルと同じ値を見るため。§6 の一元管理）
             const path = process.env.DATA_FILE;
@@ -269,6 +271,34 @@ jobs:
                 degraded = true;
               }
 
+              // 既定ブランチの Git ツリーを再帰取得し、テストファイル数を数える。
+              // **数え方は scripts/lib/test-file-count.cjs が持つ**（ここは API の叩き方だけ）。
+              // 直書きへ戻すと `node --test` から呼べなくなり、数え間違いが何も落とさなくなる
+              let test_file_count = null;
+              try {
+                const treeResponse = await github.rest.git.getTree({
+                  owner: t.owner,
+                  repo: t.repo,
+                  tree_sha: branch,
+                  recursive: "true",
+                });
+                // 切り詰められた応答では null が返る（少ない値を事実として出さないため）
+                test_file_count = countTestFiles(treeResponse.data);
+                if (test_file_count === null) {
+                  // 数えられなかったことを運用者に残す。前回値を保つので画面からは消えないが、
+                  // 「取得できた」と同じ見た目にはしない（下の degraded でその日を印付ける）
+                  core.warning(`${t.key}: tree が切り詰められているためテスト数を数えられません`);
+                  test_file_count = prevRepo.test_file_count ?? null;
+                  degraded = true;
+                }
+              } catch (e) {
+                // null のまま返すとバッジが消え、「テストが無いリポジトリ」と見分けられなく
+                // なるため、前回値を保つ（languages と同じ扱い）
+                core.warning(`${t.key}: tree 取得失敗: ${e.message}`);
+                test_file_count = prevRepo.test_file_count ?? null;
+                degraded = true;
+              }
+
               return {
                 key: t.key,
                 name: prevRepo.name || t.repo,
@@ -276,6 +306,7 @@ jobs:
                 ci,
                 last_commit,
                 languages,
+                test_file_count,
                 // 一部でも取得できていない日を「検証できた日」と同じ見た目にしない。
                 // 取得全体が失敗したときに呼び出し側が立てるのと同じ目印を、
                 // 項目ごとの失敗にも広げる（index.html では「（更新待ち）」の表示になる）

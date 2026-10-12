@@ -23,7 +23,6 @@
         "Dockerfile",
         "CSS"
       ],
-      "test_file_count": 195,
       "stale": false
     },
     {
@@ -48,7 +47,6 @@
         "Shell",
         "Dockerfile"
       ],
-      "test_file_count": 87,
       "stale": false
     },
     {
@@ -69,7 +67,6 @@
         "Shell",
         "Dockerfile"
       ],
-      "test_file_count": 10,
       "stale": false
     },
     {
@@ -91,7 +88,6 @@
         "TypeScript",
         "JavaScript"
       ],
-      "test_file_count": 6,
       "stale": false
     }
   ],

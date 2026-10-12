@@ -70,7 +70,7 @@ GIF 化に `ffmpeg` を使うため事前にインストールしておく。ブ
 | `avatar.jpg` | プロフィール画像 |
 | `favicon.svg` | ファビコン（両ページから参照） |
 | `*.pdf` | 資格証明書 |
-| `data/portfolio.json` | 各プロジェクトの CI 結果・最終コミット・言語の焼き込みデータ。`index.html` の「Live self-proof」バッジがこれを fetch する（**自動生成物**。`.github/workflows/update-portfolio-data.yml` が更新する） |
+| `data/portfolio.json` | 各プロジェクトの CI 結果・最終コミット・言語・テストファイル数の焼き込みデータ。`index.html` の「Live self-proof」バッジがこれを fetch する（**自動生成物**。`.github/workflows/update-portfolio-data.yml` が更新する） |
 | `e2e/sections.spec.ts` | セクション表示・ナビゲーションの E2E（§2 の `npm run test:e2e`） |
 | `e2e/visual.spec.ts` | ビジュアルリグレッション（スナップショット比較） |
 | `.nvmrc` | 検証ツールを動かす Node の major（**唯一の正本**。CI の 4 つの `setup-node` が `node-version-file` で読む。理由は §2） |
@@ -236,11 +236,24 @@ create or approve pull requests (createPullRequest)
 - **0 件は表示する。** 隠すと「テストが無いリポジトリ」と「数えられなかった日」が画面で同じに
   見える。`null`（数えられなかった）だけを非表示にする。
 
-**この PR の時点では画面にまだ出ない。** 焼き込み済みの `data/portfolio.json` が持っていた値は
+**導入した時点では画面にまだ出ない。** 焼き込み済みの `data/portfolio.json` が持っていた値は
 古い数え方のもの（PNG を含む）だったので外してある。正しい値は**次に手動で更新を回したとき**に
-入る（手順は上の「手で更新する手順」）。そのときカードに現れるので、**デモ GIF
-（`docs/screenshots/portfolio-nav.gif`。`works` セクションを通る）を同じ変更セットで撮り直すこと**
-（§15。静止画 4 枚はいずれもプロジェクトカードを写していないので更新不要）。
+入る（手順は上の「手で更新する手順」）。
+
+**値が入る更新の PR では、同じ変更セットで 2 つを直すこと。** どちらもバッジが 1 つ増えて
+画面が変わることの帰結で、忘れると更新 PR 自体が取り込めなくなる。
+
+1. **ビジュアルリグレッションのベースライン** `e2e/visual.spec.ts-snapshots/index-linux.png`。
+   `toHaveScreenshot(fullPage: true)` の対象にプロジェクトカードが入っているので、バッジが
+   増えると必ず食い違う（**画像の縦幅が変われば `maxDiffPixelRatio` に関係なく落ちる**）。
+   `visual-regression` は必須チェックなので、**データ更新 PR が赤のままマージできなくなる**
+   ——つまり「サイトのデータを最新に保つ唯一の経路」が自分で自分を塞ぐ。手元の Chromium は
+   CI と build が違って別の絵になるため `--update-snapshots` は使えない（§2）。**ベースラインを
+   削って push し、`visual-regression` ジョブに撮り直させる**（不足分は自動コミットされる。
+   その push は `GITHUB_TOKEN` なので CI が再起動しない。`ci.yml` を `workflow_dispatch` で
+   先端に対して流し直すところまでが手順）。
+2. **デモ GIF** `docs/screenshots/portfolio-nav.gif`（`works` セクションを通る。§15）。
+   静止画 4 枚はいずれもプロジェクトカードを写していないので更新不要。
 
 ### CI バッジが何を名乗るかは `scripts/lib/ci-verdict.cjs` が決める
 

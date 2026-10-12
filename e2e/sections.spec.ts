@@ -290,6 +290,10 @@ test.describe("index.html の CI バッジの出どころ表示", () => {
     // 「テスト null 件」「テスト undefined 件」のような壊れた表示にならないこと
     for (const extra of [{ test_file_count: null }, {}]) {
       await gotoWithCi(page, { status: "success", is_head: true }, extra);
+      // **「0 件」の前に、そもそも描画が動いたことを確かめる。** CSP の sha256 とインライン
+      // script がずれるとブラウザが script を止め、バッジが 1 つも出ない（html-validate も
+      // サーバーも素通りする静かな壊れ方）。それでも下の 0 件は満たされてしまう
+      await expect(ciBadges(page)).toHaveCount(PROOF_CARD_COUNT);
       await expect(testCountBadges(page)).toHaveCount(0);
     }
   });

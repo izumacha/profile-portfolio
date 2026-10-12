@@ -136,8 +136,8 @@ jobs:
             // github-script の `require` はアクション側のディレクトリを基準に解決するため、
             // ワークスペースの絶対パスで読む（公式に案内されている書き方）。
             const ciVerdict = require(`${process.env.GITHUB_WORKSPACE}/scripts/lib/ci-verdict.cjs`);
-            // 「テスト N 件」バッジの数え方。**判定はこのモジュールが持つ**（単体テストで固定）
-            const { countTestFiles } = require(`${process.env.GITHUB_WORKSPACE}/scripts/lib/test-file-count.cjs`);
+            // 「テスト N 件」バッジの数え方。**判定と、数えられない理由の文言はこのモジュールが持つ**
+            const { inspectTestFiles, UNCOUNTABLE_MESSAGES } = require(`${process.env.GITHUB_WORKSPACE}/scripts/lib/test-file-count.cjs`);
             // 書き出し先はワークフロー env の DATA_FILE を唯一の参照元にする
             // （後段の差分判定シェルと同じ値を見るため。§6 の一元管理）
             const path = process.env.DATA_FILE;
@@ -279,21 +279,27 @@ jobs:
                 const treeResponse = await github.rest.git.getTree({
                   owner: t.owner,
                   repo: t.repo,
-                  tree_sha: branch,
+                  // **ブランチ名ではなく、上で確定した先頭コミットのツリーを引く。** ブランチ名で
+                  // 引くと getTree の時点で参照し直すので、直前に別のコミットが入ると
+                  // 「最終 <古いコミットの日付>」と「テスト <新しいツリーの件数>」が同じカードに
+                  // 並ぶ。この画面は「どのコミットの事実か」を明示することを身上にしている
+                  tree_sha: sha || branch,
                   recursive: "true",
                 });
-                // 切り詰められた応答では null が返る（少ない値を事実として出さないため）
-                test_file_count = countTestFiles(treeResponse.data);
-                if (test_file_count === null) {
-                  // 数えられなかったことを運用者に残す。前回値を保つので画面からは消えないが、
-                  // 「取得できた」と同じ見た目にはしない（下の degraded でその日を印付ける）
-                  core.warning(`${t.key}: tree が切り詰められているためテスト数を数えられません`);
-                  test_file_count = prevRepo.test_file_count ?? null;
-                  degraded = true;
+                // 数えられないときは件数ではなく理由が返る（少ない値を事実として出さないため）
+                const inspected = inspectTestFiles(treeResponse.data);
+                if (inspected.reason) {
+                  // **前回値は持ち越さず degraded も立てない。** 切り詰めはリポジトリが大きい限り
+                  // 毎回起きるので、持ち越すと「（更新待ち）」が永久に消えなくなる一方、他の項目は
+                  // ちゃんと取れている。数えられない日はバッジを出さないのが正直な縮退
+                  core.warning(`${t.key}: ${UNCOUNTABLE_MESSAGES[inspected.reason]}`);
+                } else {
+                  test_file_count = inspected.count; // 数えられたので採用する
                 }
               } catch (e) {
-                // null のまま返すとバッジが消え、「テストが無いリポジトリ」と見分けられなく
-                // なるため、前回値を保つ（languages と同じ扱い）
+                // 取得そのものの失敗（ネットワーク・権限など）は一時的なことが多い。null のまま
+                // 返すとバッジが消え「テストが無いリポジトリ」と見分けられなくなるため前回値を
+                // 保ち、その日を degraded として印付ける（languages と同じ扱い）
                 core.warning(`${t.key}: tree 取得失敗: ${e.message}`);
                 test_file_count = prevRepo.test_file_count ?? null;
                 degraded = true;
@@ -328,10 +334,10 @@ jobs:
             }
 
             // 新しい JSON を組み立てる。
-            // **誰も読まない項目は収集しない**（§6 デッドコードを残さない）。以前あった
-            // `site_quality` と `test_file_count` を外した理由と実測は CLAUDE.md §3 が正本。
-            // **表示したくなったら、画面側の表示と同じ変更セットで戻すこと**
-            // （出力だけ戻すと、また誰も読まないまま API 呼び出しが増える）。
+            // **誰も読まない項目は収集しない**（§6 デッドコードを残さない）。`site_quality` は
+            // 誰も書かず誰も読まないまま出ていたので外した（理由と実測は CLAUDE.md §3 が正本）。
+            // `test_file_count` は約束どおり**画面側の表示と同じ変更セットで**戻したもの。
+            // **表示しない項目を出力だけ戻さないこと**（また誰も読まないまま API 呼び出しが増える）。
             const out = {
               generated_at: new Date().toISOString(),
               repos,

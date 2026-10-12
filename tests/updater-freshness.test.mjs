@@ -143,13 +143,28 @@ describe("updater の鮮度チェック", () => {
     // 検知は github.event_name から導いているので、`schedule:` を足せば自動で再武装する）。
     const triggers = source.slice(source.indexOf("\non:"), source.indexOf("\npermissions:")); // on: ブロックだけを見る
     assert.notEqual(triggers, "", "on: ブロックを切り出せない");
-    const scheduleLines = triggers
+    // **行頭の綴りで見るので、まずブロック形式であることを要求する。** `on: { schedule: [...] }`
+    // のようにフロー形式で書かれると、行頭が `on: {` になって下の走査がまるごと外れ、
+    // 日次実行を戻しても緑のまま通る（実測）。YAML パーサは依存が増えるので入れず、
+    // 「走査が成り立つ形で書く」ことを条件にして fail-closed にする
+    assert.ok(!/[{[]/.test(triggers), "on: をフロー形式で書くと下の走査が外れる（ブロック形式で書くこと）");
+    const declarations = triggers
       .split("\n")
       .map((line) => line.trim()) // 字下げを落として行頭を見る
-      .filter((line) => !line.startsWith("#")) // 経緯を書いたコメントは数えない
-      .filter((line) => line.startsWith("schedule:") || line.startsWith("- cron:")); // 実際の宣言だけ
-    assert.deepEqual(scheduleLines, [], "定期実行が宣言されている（意図的に止めてある前提が崩れた）");
-    assert.ok(triggers.includes("workflow_dispatch:"), "手動実行の口が無い（止めたうえに動かせなくなっている）");
+      .filter((line) => !line.startsWith("#")); // 経緯を書いたコメントは数えない（下記）
+    // **コメントを除去してから見るのが要点。** このワークフローは経緯を長いコメントで残す
+    // 慣習があり、今回の変更で `on:` のコメントは手動実行の話で埋まった。生のテキストを
+    // `includes` で見ると、`workflow_dispatch:` の行を消してコメントに言及を残すだけで
+    // 緑のまま通り、**トリガーが 0 件＝起動不能なワークフロー**を検知できない（実測）
+    assert.deepEqual(
+      declarations.filter((line) => line.startsWith("schedule:") || line.startsWith("- cron:")),
+      [],
+      "定期実行が宣言されている（意図的に止めてある前提が崩れた）",
+    );
+    assert.ok(
+      declarations.some((line) => line.startsWith("workflow_dispatch:")),
+      "手動実行の口が無い（止めたうえに動かせなくなっている）",
+    );
   });
 
   it("門番の判定材料がイベント名から導かれている（検知が永久に閉じるのを防ぐ）", () => {

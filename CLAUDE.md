@@ -124,6 +124,17 @@ create or approve pull requests (createPullRequest)
    `::warning::` が出る（run は**緑**で終わる。これが正常）。
 2. そのブランチから `main` への PR を人が作る。CI の検査が走るので緑を確認してマージする。
 
+**その PR が open の間は再実行しないこと（実行すると詰む）。** 更新ブランチへの push は毎回
+`--force-with-lease` で起点から作り直すので、open な PR の先端が差し替わる。しかもその push は
+`GITHUB_TOKEN` で行われ、**GitHub の仕様で他のワークフローを起動しない**（この制約は
+`ci.yml` の `workflow_dispatch` のコメントが同じ理由で記録している）。結果として PR の先端は
+「検査が 1 つも無いコミット」になり、必須ステータスチェックを設定しているとマージできないまま
+止まる。しかも PR を探す `own_open_pr_number` は head / base / open だけで絞り**作成者を見ない**
+ので、人が作った PR がそのまま再利用される。詰まったら PR を作り直すか、`ci.yml` を
+`workflow_dispatch` で先端に対して走らせ直す（ワークフロー側も最後に `::warning::` で
+「必須チェックは自動起動しないので手動で起動してマージすること」を案内する）。
+**取り込んでから次を実行するのが確実。**
+
 **再開するときに触る場所。** `schedule:` を足し直すだけでよく、鮮度の検知は
 `github.event_name` から導いているので**何も書き換えずに再武装する**。ただし
 `tests/updater-freshness.test.mjs` の「定期実行は意図的に外してある」が落ちるので、

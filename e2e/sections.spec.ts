@@ -202,7 +202,7 @@ test.describe("index.html の CI バッジの出どころ表示", () => {
   // その日の中身次第でテストが何も確かめない日ができてしまう。
   // ここでは 3 枚のカード全部に同じ ci を持たせ、1 枚目だけ run_url を持たせる
   // （リンクバッジと span バッジで**別々の分岐**を通るため、片方だけ直す変更を落とすため）。
-  function portfolioFixture(ci: Record<string, unknown>) {
+  function portfolioFixture(ci: Record<string, unknown>, repoExtra: Record<string, unknown> = {}) {
     return {
       generated_at: "2026-10-11T00:00:00.000Z", // 最終検証日時（表示されるだけ）
       repos: PROOF_FIXTURE_KEYS.map((key, i) => ({
@@ -215,15 +215,20 @@ test.describe("index.html の CI バッジの出どころ表示", () => {
         last_commit: { iso: "2026-10-10T00:00:00Z", sha7: "1111111", url: "" }, // 最終コミット
         languages: ["TypeScript"], // 主要言語
         stale: false, // 前回値保持ではない
+        ...repoExtra, // 検証したい項目だけを上書きする（テスト数バッジなど）
       })),
     };
   }
 
   // portfolio.json を差し替えてからトップページを開く
-  async function gotoWithCi(page: Page, ci: Record<string, unknown>): Promise<void> {
+  async function gotoWithCi(
+    page: Page,
+    ci: Record<string, unknown>,
+    repoExtra: Record<string, unknown> = {},
+  ): Promise<void> {
     // 静的 JSON の取得をフィクスチャで置き換える（fetch("data/portfolio.json") に当たる）
     await page.route("**/data/portfolio.json", (route) =>
-      route.fulfill({ contentType: "application/json", body: JSON.stringify(portfolioFixture(ci)) }),
+      route.fulfill({ contentType: "application/json", body: JSON.stringify(portfolioFixture(ci, repoExtra)) }),
     );
     // 差し替えを有効にしたうえでページを開く
     await page.goto("/index.html");
@@ -257,6 +262,40 @@ test.describe("index.html の CI バッジの出どころ表示", () => {
     await gotoWithCi(page, { status: "success" });
     // 「CI 成功（undefined 時点）」のような壊れた表示にならないことを確認する
     await expect(ciBadges(page).first()).toHaveText("CI 成功");
+  });
+
+  // テスト数バッジだけを取り出す（「テスト 123 件」の形のバッジ）
+  function testCountBadges(page: Page) {
+    return page.locator(".work-card[data-repo-key] [data-proof] .proof-badge", { hasText: /^テスト \d+ 件$/ });
+  }
+
+  test("テスト数が焼き込まれていれば件数バッジを出す", async ({ page }) => {
+    // 実データと同じ形（数えられた日は整数が入る）
+    await gotoWithCi(page, { status: "success", is_head: true }, { test_file_count: 185 });
+    // 3 枚すべてに出る（カードごとに描画を分けていないことの確認も兼ねる）
+    await expect(testCountBadges(page)).toHaveCount(PROOF_CARD_COUNT);
+    await expect(testCountBadges(page).first()).toHaveText("テスト 185 件");
+  });
+
+  test("0 件でもバッジを出す（「テストが無い」と「数えられなかった」を分ける）", async ({ page }) => {
+    // **0 を隠すと、テストを 1 つも持たないリポジトリと、数えられなかった日が画面で同じに見える。**
+    // 焼き込み側は数えられないときだけ null を入れるので、0 は「数えた結果 0 件」という事実
+    await gotoWithCi(page, { status: "success", is_head: true }, { test_file_count: 0 });
+    await expect(testCountBadges(page)).toHaveCount(PROOF_CARD_COUNT);
+    await expect(testCountBadges(page).first()).toHaveText("テスト 0 件");
+  });
+
+  test("数えられなかった日・古い形のデータではバッジを出さない", async ({ page }) => {
+    // null（ツリーが切り詰められた等）と、項目そのものが無い以前の形の両方を見る。
+    // 「テスト null 件」「テスト undefined 件」のような壊れた表示にならないこと
+    for (const extra of [{ test_file_count: null }, {}]) {
+      await gotoWithCi(page, { status: "success", is_head: true }, extra);
+      // **「0 件」の前に、そもそも描画が動いたことを確かめる。** CSP の sha256 とインライン
+      // script がずれるとブラウザが script を止め、バッジが 1 つも出ない（html-validate も
+      // サーバーも素通りする静かな壊れ方）。それでも下の 0 件は満たされてしまう
+      await expect(ciBadges(page)).toHaveCount(PROOF_CARD_COUNT);
+      await expect(testCountBadges(page)).toHaveCount(0);
+    }
   });
 });
 

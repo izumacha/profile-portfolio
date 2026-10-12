@@ -70,7 +70,7 @@ GIF 化に `ffmpeg` を使うため事前にインストールしておく。ブ
 | `avatar.jpg` | プロフィール画像 |
 | `favicon.svg` | ファビコン（両ページから参照） |
 | `*.pdf` | 資格証明書 |
-| `data/portfolio.json` | 各プロジェクトの CI 結果・最終コミット・言語の焼き込みデータ。`index.html` の「Live self-proof」バッジがこれを fetch する（**自動生成物**。`.github/workflows/update-portfolio-data.yml` が更新する） |
+| `data/portfolio.json` | 各プロジェクトの CI 結果・最終コミット・言語・テストファイル数の焼き込みデータ。`index.html` の「Live self-proof」バッジがこれを fetch する（**自動生成物**。`.github/workflows/update-portfolio-data.yml` が更新する） |
 | `e2e/sections.spec.ts` | セクション表示・ナビゲーションの E2E（§2 の `npm run test:e2e`） |
 | `e2e/visual.spec.ts` | ビジュアルリグレッション（スナップショット比較） |
 | `.nvmrc` | 検証ツールを動かす Node の major（**唯一の正本**。CI の 4 つの `setup-node` が `node-version-file` で読む。理由は §2） |
@@ -84,6 +84,8 @@ GIF 化に `ffmpeg` を使うため事前にインストールしておく。ブ
 | `scripts/lib/ci-verdict.cjs` | `data/portfolio.json` の CI バッジが何を名乗るかを決める純粋ロジック（下記。updater のワークフローから `require` される） |
 | `scripts/run-unit-tests.mjs` | `tests/` のユニットテストを走らせる小さなランナー（0 件のとき落とすため。下記） |
 | `tests/ci-verdict.test.mjs` | 上の判定を固定するユニットテスト（`node --test`） |
+| `scripts/lib/test-file-count.cjs` | 「テスト N 件」バッジの数え方を決める純粋ロジック（下記。updater のワークフローから `require` される） |
+| `tests/test-file-count.test.mjs` | 上の数え方を固定するユニットテスト（`node --test`） |
 | `tests/updater-freshness.test.mjs` | updater の鮮度チェックを YAML から切り出して `bash` で動かすテスト（`bash` と `jq` が必要。下記） |
 | `docs/screenshots/` | README 掲載用のスクリーンショットとデモ GIF（自動生成物） |
 
@@ -207,10 +209,51 @@ create or approve pull requests (createPullRequest)
 凍る」）。
 
 **誰も読まない項目は収集しない。** 以前は `site_quality`（4 つとも `null` のまま誰も書かず
-誰も読まない）と、リポジトリごとの `test_file_count`（既定ブランチの**再帰**ツリーを毎日
-4 回取得して数えていたが、画面にも README にも出していない）を出力していた。どちらも外した
+誰も読まない）と、リポジトリごとの `test_file_count`（既定ブランチの**再帰**ツリーを取得して
+数えていたが、画面にも README にも出していない）を出力していた。どちらも一度外した
 （§6 デッドコードを残さない）。**表示したくなったら、画面側の表示と同じ変更セットで戻すこと**
 ——出力だけ戻すと、また誰も読まないまま API 呼び出しが増える。
+
+**`test_file_count` はこの約束どおり、表示と同じ変更セットで戻した**（プロジェクトカードの
+「テスト N 件」バッジ）。`site_quality` は出していないままで、**戻すなら同じく表示とセットで**。
+
+### 「テスト N 件」の数え方は `scripts/lib/test-file-count.cjs` が決める
+
+**数え方の正本はそのモジュールで、規則も実測値もここに書き写さない**（増やしたときに
+こちらだけが古くなる）。CLAUDE.md 側に残すのは、なぜそこに置いたかという判断だけ。
+
+- **ワークフローの `script:` ブロックに数え方を書かない。** `actions/github-script` の中身は
+  `node --test` から呼べないので、間違えても何も落ちない。実際、以前の実装は「`tests/` や
+  `e2e/` の下にあるファイル」を数えており、**スナップショットの PNG 2 枚とヘルパーまで
+  「テスト」に含めていた**（profile-portfolio で 8 件と出ていたが実際のテストファイルは 5 件）。
+  CI バッジの判定を `ci-verdict.cjs` へ出したのとまったく同じ理由。
+- **数え過ぎより数え落としへ倒す。** この値は「いま本当にこれだけテストがある」という自己証明
+  として画面に出るので、嘘になる側（多め）を避ける。拡張子は許可リストで絞り、知らない拡張子は
+  数えない。数え落としの実例もモジュールのコメントに残してある。
+- **ツリーが切り詰められていたら数えない。** GitHub の再帰ツリーは大きなリポジトリで
+  `truncated: true` を立てて一部だけ返す。そのまま数えると実際より少ない値を「テスト N 件」と
+  して出し、画面からは正しい値と区別できない。数えられないときは `null` を返し、バッジを出さない。
+- **0 件は表示する。** 隠すと「テストが無いリポジトリ」と「数えられなかった日」が画面で同じに
+  見える。`null`（数えられなかった）だけを非表示にする。
+
+**導入した時点では画面にまだ出ない。** 焼き込み済みの `data/portfolio.json` が持っていた値は
+古い数え方のもの（PNG を含む）だったので外してある。正しい値は**次に手動で更新を回したとき**に
+入る（手順は上の「手で更新する手順」）。
+
+**値が入る更新の PR では、同じ変更セットで 2 つを直すこと。** どちらもバッジが 1 つ増えて
+画面が変わることの帰結で、忘れると更新 PR 自体が取り込めなくなる。
+
+1. **ビジュアルリグレッションのベースライン** `e2e/visual.spec.ts-snapshots/index-linux.png`。
+   `toHaveScreenshot(fullPage: true)` の対象にプロジェクトカードが入っているので、バッジが
+   増えると必ず食い違う（**画像の縦幅が変われば `maxDiffPixelRatio` に関係なく落ちる**）。
+   `visual-regression` は必須チェックなので、**データ更新 PR が赤のままマージできなくなる**
+   ——つまり「サイトのデータを最新に保つ唯一の経路」が自分で自分を塞ぐ。手元の Chromium は
+   CI と build が違って別の絵になるため `--update-snapshots` は使えない（§2）。**ベースラインを
+   削って push し、`visual-regression` ジョブに撮り直させる**（不足分は自動コミットされる。
+   その push は `GITHUB_TOKEN` なので CI が再起動しない。`ci.yml` を `workflow_dispatch` で
+   先端に対して流し直すところまでが手順）。
+2. **デモ GIF** `docs/screenshots/portfolio-nav.gif`（`works` セクションを通る。§15）。
+   静止画 4 枚はいずれもプロジェクトカードを写していないので更新不要。
 
 ### CI バッジが何を名乗るかは `scripts/lib/ci-verdict.cjs` が決める
 

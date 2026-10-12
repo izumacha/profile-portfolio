@@ -45,10 +45,13 @@ process.on("exit", () => {
   }
 });
 
-// 指定した generated_at で関数を 1 回動かし、終了コードと注釈を返す
-function runFreshness(generatedAt) {
+// 指定した generated_at で関数を 1 回動かし、終了コードと注釈を返す。
+// `scheduled` は本番の IS_SCHEDULED_RUN（定期実行か）。**既定は true**（＝本体を通す）で、
+// 既定を false にすると既存の検査すべてが門番で素通りして検出網が空回りする
+function runFreshness(generatedAt, { scheduled = true } = {}) {
   const script = [
     "set -euo pipefail", // 本番のステップと同じ設定で動かす
+    `IS_SCHEDULED_RUN=${JSON.stringify(String(scheduled))}`, // 本番は env で渡る門番の判定材料
     "BASE_BRANCH=main", // 注釈に埋め込まれるだけの値
     "DATA_FILE=data/portfolio.json", // 同上
     `stale_err=${JSON.stringify(join(workDir, "stale.err"))}`, // jq の stderr の退避先（使い回す）
@@ -131,6 +134,68 @@ describe("updater の鮮度チェック", () => {
       source.includes('if [ "$merge_mode" != "immediate" ]; then\n              check_data_freshness "'),
       "末尾の呼び出しが `merge_mode != immediate` の直下に無い（即時マージの日に false red になる）",
     );
+  });
+
+  it("定期実行は意図的に外してある（前提の確認）", () => {
+    // **この検査が落ちたら、落ちたこと自体が目的を果たしている。** 定期実行を再開するなら
+    // それは「毎日動かしても人の操作なしでは取り込まれない」構成へ戻す判断なので、
+    // ここと CLAUDE.md §3 を同じ変更セットで更新してレビューに載せること（下の鮮度の
+    // 検知は github.event_name から導いているので、`schedule:` を足せば自動で再武装する）。
+    const triggers = source.slice(source.indexOf("\non:"), source.indexOf("\npermissions:")); // on: ブロックだけを見る
+    assert.notEqual(triggers, "", "on: ブロックを切り出せない");
+    // **行頭の綴りで見るので、まずブロック形式であることを要求する。** `on: { schedule: [...] }`
+    // のようにフロー形式で書かれると、行頭が `on: {` になって下の走査がまるごと外れ、
+    // 日次実行を戻しても緑のまま通る（実測）。YAML パーサは依存が増えるので入れず、
+    // 「走査が成り立つ形で書く」ことを条件にして fail-closed にする
+    assert.ok(!/[{[]/.test(triggers), "on: をフロー形式で書くと下の走査が外れる（ブロック形式で書くこと）");
+    const declarations = triggers
+      .split("\n")
+      .map((line) => line.trim()) // 字下げを落として行頭を見る
+      .filter((line) => !line.startsWith("#")); // 経緯を書いたコメントは数えない（下記）
+    // **コメントを除去してから見るのが要点。** このワークフローは経緯を長いコメントで残す
+    // 慣習があり、今回の変更で `on:` のコメントは手動実行の話で埋まった。生のテキストを
+    // `includes` で見ると、`workflow_dispatch:` の行を消してコメントに言及を残すだけで
+    // 緑のまま通り、**トリガーが 0 件＝起動不能なワークフロー**を検知できない（実測）
+    assert.deepEqual(
+      declarations.filter((line) => line.startsWith("schedule:") || line.startsWith("- cron:")),
+      [],
+      "定期実行が宣言されている（意図的に止めてある前提が崩れた）",
+    );
+    assert.ok(
+      declarations.some((line) => line.startsWith("workflow_dispatch:")),
+      "手動実行の口が無い（止めたうえに動かせなくなっている）",
+    );
+  });
+
+  it("門番の判定材料がイベント名から導かれている（検知が永久に閉じるのを防ぐ）", () => {
+    // 式を「決して true にならないもの」（`'workflow_dispatch'` との比較や固定の false）へ
+    // 書き換えると、`schedule:` を足し直しても検知が二度と鳴らない。しかも PR 作成が
+    // 塞がっている構成では警告を出して緑で終わるので、**全部緑のまま**データ停止だけが
+    // 見えなくなる。env の 1 行を落とす形は `set -u` が unbound variable で止めるので
+    // 静かには壊れない（本番のコメントに実測を記録済み）が、こちらは静かに壊れる
+    assert.ok(
+      source.includes("IS_SCHEDULED_RUN: ${{ github.event_name == 'schedule' }}"),
+      "IS_SCHEDULED_RUN が github.event_name == 'schedule' から導かれていない",
+    );
+  });
+
+  it("定期実行でなければ、どれだけ古くても何も言わずに緑で通す", () => {
+    // 手動実行は「いま更新したい」という操作なので、押した時点のデータは常に閾値より古い。
+    // ここを赤にすると**正しく動いている手動実行が必ず赤**になり、「赤が合図として
+    // 機能しない」状態を向きを変えて作り直すだけになる
+    const r = runFreshness(hoursAgo(STALE_HOURS * 10), { scheduled: false }); // 遥かに古い値
+    assert.equal(r.status, 0, `赤で止まっている: ${r.stdout}${r.stderr}`); // 緑で終わる
+    assert.equal(r.stdout, "", `注釈が出ている: ${r.stdout}`); // 何も言わない
+  });
+
+  it("定期実行でなければ、判定材料が無くても読めなくても緑で通す（門番が先にあること）", () => {
+    // 門番を 3 つの枝より**後ろ**に置くと、手動実行でも「判定できない」側が赤を出す。
+    // 監視する対象が無い状態では安全網の有無を問う意味自体が無いので、門番が先に来る
+    for (const value of ["", "2026/10/11 とても古い"]) {
+      const r = runFreshness(value, { scheduled: false });
+      assert.equal(r.status, 0, `${JSON.stringify(value)} で赤になった: ${r.stdout}${r.stderr}`);
+      assert.equal(r.stdout, "", `${JSON.stringify(value)} で注釈が出た: ${r.stdout}`);
+    }
   });
 
   it("しきい値より新しければ緑で通す", () => {

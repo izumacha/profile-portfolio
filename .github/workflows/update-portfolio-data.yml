@@ -5,16 +5,25 @@ name: Update Portfolio Data
 # ブラウザは生成済みの静的 JSON を fetch するだけなので、サイト側はノービルドのまま。
 # （このワークフロー内のスクリプトはサイトの成果物ではないため no-build 原則に抵触しない）
 #
+# **いまは定期実行していない（手動実行のみ）。** 理由と再開手順は下の `on:` のコメントと
+# CLAUDE.md §3「`data/portfolio.json` の更新は手動運用にしてある」を参照。
+#
 # main はブランチ保護（PR 必須＋必須ステータスチェック）により直 push できないため、
 # 更新コミットは専用ブランチへ push し、PR の作成＋auto-merge 設定で main へ取り込む。
 # （直 push 方式は 2026-08-03 以降 "push declined due to repository rule violations" で
 #   連日失敗していた。保護を弱めるのではなくワークフロー側を保護に適合させる。）
 
 on:
-  # 日次で自動更新（UTC 21:00 = JST 翌 06:00）
-  schedule:
-    - cron: "0 21 * * *"
-  # Actions タブから手動実行も可能にする
+  # **定期実行は意図的に外してある（手動実行のみ）。** 以前は日次（UTC 21:00 = JST 翌 06:00）で
+  # 走らせていたが、PR 作成に PAT（PAGES_DEPLOY_TOKEN）が要る構成で所有者が PAT を設定しない
+  # 判断をしたため、毎日走らせても「更新ブランチへ push → PR 作成を拒否される → 警告を出して
+  # 緑で終わる」を繰り返すだけで、取り込みには必ず人の操作が必要だった。自動で完結しない処理を
+  # 毎日動かすと注釈だけが積み上がって合図として機能しなくなるので、人が必要なときに走らせる
+  # 形へ寄せた（下の鮮度の検知も、監視する対象＝定期的に届くデータが無くなるため止まる）。
+  #
+  # **日次へ戻すときは `schedule:` を足すだけでよい。** 鮮度の検知は github.event_name から
+  # 導いているので自動で再武装する。ただし CLAUDE.md §3 と tests/updater-freshness.test.mjs の
+  # 「定期実行していない」という前提も同じ変更セットで更新すること（後者は落ちて気付かせる）。
   workflow_dispatch:
 
 # GITHUB_TOKEN の権限（最小権限）。
@@ -28,7 +37,7 @@ permissions:
   actions: read
   pull-requests: write
 
-# スケジュール実行と手動実行が重なると、同じ更新ブランチへの force push と
+# 実行が重なると（手動実行どうしでも、定期実行を再開すればそれとも）、同じ更新ブランチへの force push と
 # 「PR がまだ無ければ作る」判定が競合する（両方の実行が「PR なし」と読んで
 # 二重に gh pr create を呼び、後発が "already exists" で失敗する）。
 # 直列化して競合そのものを無くす。進行中の実行は途中で殺さず順番待ちにする
@@ -458,14 +467,26 @@ jobs:
           REPO_OWNER: ${{ github.repository_owner }}
           # REST API を叩くときの owner/repo 形式のフルネーム。
           # repo 名単体もここから取り出す（シェル冒頭の REPO_NAME 参照）。
-          # github.event.repository.name を使わないのは、このワークフローの主トリガーである
-          # schedule イベントでは event payload に repository が含まれず空になるため
+          # github.event.repository.name を使わないのは、schedule イベントでは event payload に
+          # repository が含まれず空になるため（いまは手動実行のみだが、定期実行を再開した
+          # 瞬間に壊れる形なので、イベントに依らない github.repository から取る）
           # （空のまま own_open_pr_number の絞り込みに使うと自分の PR を見つけられず、
           #   2 日目以降 "already exists" → 再取得も空 → 毎日赤、で止まってしまう）。
           REPO_FULL_NAME: ${{ github.repository }}
           # PAT が設定されているかどうか。値そのものは使わず有無だけを見て、
           # 「必須チェックが自動起動しない構成」を実行中に警告するために使う。
           HAS_DEPLOY_TOKEN: ${{ secrets.PAGES_DEPLOY_TOKEN != '' }}
+          # この実行が定期実行か。データ鮮度の検知をこのときだけ有効にするために使う
+          # （理由は check_data_freshness のコメント）。`schedule:` を足し直せば自動で
+          # true になるので、再開時に書き換える場所を増やさない。
+          #
+          # **この 1 行を落としても静かには壊れない**（ステップは `set -euo pipefail` で動くので
+          # 未設定の変数を読んだ時点で unbound variable で止まり、次の手動実行が赤くなる）。
+          # だから既定値を与えない — `${IS_SCHEDULED_RUN:-}` と書くと落ちずに「定期実行ではない」
+          # 側へ倒れ、検知が二度と鳴らない状態が無言で完成する（§9 fail-closed）。
+          # 静かに壊れるのは**式を「決して true にならないもの」へ書き換えた**ときなので、
+          # tests/updater-freshness.test.mjs が式そのものを見張っている。
+          IS_SCHEDULED_RUN: ${{ github.event_name == 'schedule' }}
           # 前段が push したコミット。PR の先端がこれと一致することを確認してから取り込む。
           PUSHED_SHA: ${{ steps.push.outputs.sha }}
           # 起点ブランチ側の generated_at（＝前回までに実際に取り込まれた時刻）。
@@ -771,10 +792,22 @@ jobs:
           # **一度も到達しなかった**（CLAUDE.md §3 がその穴を記録している。実測で 2 か月以上、
           # 毎日の赤はすべて PR 作成の失敗で、この検知が鳴ったことは一度も無い）。
           # 第 1 引数は「停止を検知したとき何を確認すればよいか」の案内文（経路ごとに違う）。
+          #
+          # **見るのは定期実行のときだけ。** この検知が答える問いは「定期的に届くはずのデータが
+          # 届かなくなっていないか」なので、定期実行を外した状態（いまの `on:` を参照）では
+          # 監視する対象そのものが無い。手動実行で見てしまうと、人が「いま更新したい」と
+          # 押した実行が**必ず赤**になる（押す時点のデータは常に閾値より古い）。それは
+          # 下のコメントが潰そうとしている「赤が合図として機能しない」状態を、向きを変えて
+          # 作り直すだけになる。判定は github.event_name から導いた IS_SCHEDULED_RUN を
+          # 見るので、`schedule:` を足し直した時点で**何も書き換えずに再武装する**。
           STALE_DATA_HOURS=48
           check_data_freshness() {
               local next_step_hint data_is_stale   # 同じステップの他の関数と同じく局所化する
               next_step_hint="$1"   # 停止を検知したときに読ませる案内（経路ごとに違う）
+              # 定期実行でなければ監視する対象が無いので、何も言わずに戻る（上のコメント参照）。
+              if [ "$IS_SCHEDULED_RUN" != "true" ]; then
+                  return 0
+              fi
               # 判定材料そのものが無い場合。前段（Commit to update branch）は空を赤で
               # 弾くのでここへは来ない想定だが、来たときに黙って素通りすると、この検知
               # だけが無言で止まる＝下で潰している「緑のままデータが止まる」状態になる。
